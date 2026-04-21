@@ -1,0 +1,32 @@
+# Build outputs
+*.o
+*.a
+*.so
+*.ko
+
+# Executables
+*.exe
+*.out
+*.bin
+*.img
+*.iso
+
+# Compiled files
+*.d
+*.dwo
+
+# Build directories
+/build/
+/out/
+/dist/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*~
