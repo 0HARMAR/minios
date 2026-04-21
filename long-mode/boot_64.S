@@ -4,6 +4,7 @@
 
 .section .text
 .global boot_64
+.extern kernel_main
 .code32
 boot_64:
     # first, check CPU support long mode
@@ -103,12 +104,34 @@ start64:
     movw %ax, %gs
     movw %ax, %ss
 
-    # now in 64 bit mode
+    # setup stack
+    movq $0x90000, %rsp
+
+    # debug: print "64-bit mode OK!" to VGA
     movq $0xB8000, %rdi
     movb $'6', (%rdi)
-    movb $0x0F, 1(%rdi)
+    movb $0x0A, 1(%rdi)
     movb $'4', 2(%rdi)
-    movb $0x0F, 3(%rdi)
+    movb $0x0A, 3(%rdi)
+    movb $'-', 4(%rdi)
+    movb $0x0A, 5(%rdi)
+    movb $'b', 6(%rdi)
+    movb $0x0A, 7(%rdi)
+    movb $'i', 8(%rdi)
+    movb $0x0A, 9(%rdi)
+    movb $'t', 10(%rdi)
+    movb $0x0A, 11(%rdi)
+    movb $' ', 12(%rdi)
+    movb $0x0A, 13(%rdi)
+    movb $'O', 14(%rdi)
+    movb $0x0A, 15(%rdi)
+    movb $'K', 16(%rdi)
+    movb $0x0A, 17(%rdi)
+    movb $'!', 18(%rdi)
+    movb $0x0A, 19(%rdi)
+
+    # now in 64 bit mode, call C kernel
+    call kernel_main
 
     cli
 1:  hlt
