@@ -3,7 +3,7 @@
 
 src="$1"
 object="${src%.*}.o"
-bin="${src%.*}.bin"
+bin="boot_mbr.bin"
 
 disk="$2"
 
