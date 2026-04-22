@@ -1,46 +1,9 @@
 #include <stdint.h>
-
-void outb(uint16_t port, uint8_t value);
-uint8_t inb(uint16_t port);
-
-void update_cursor(uint32_t position) {
-    uint16_t char_pos = position / 2;
-    outb(0x3D4, 0x0F);
-    outb(0x3D5, (uint8_t)(char_pos & 0xFF));
-    outb(0x3D4, 0x0E);
-    outb(0x3D5, (uint8_t)((char_pos >> 8) & 0xFF));
-}
-
-void clear_screen(unsigned char *vga_buffer) {
-    const uint32_t vga_size = 80 * 25 * 2;
-    const uint8_t attribute = 0x0B;
-    for (uint32_t i = 0; i < vga_size; i += 2) {
-        vga_buffer[i] = ' ';
-        vga_buffer[i + 1] = attribute;
-    }
-}
-
-void print_char(unsigned char *vga_buf, char c, uint32_t *cursor, uint8_t attr) {
-    vga_buf[*cursor] = c;
-    vga_buf[*cursor + 1] = attr;
-    *cursor += 2;
-}
-
-void print_string(unsigned char *vga_buf, const char *str, uint32_t *cursor) {
-    while (*str) {
-        vga_buf[*cursor] = *str++;
-        vga_buf[*cursor + 1] = 0x0B;
-        *cursor += 2;
-    }
-}
-
-void print_newline(unsigned char *vga_buf, uint32_t *cursor) {
-    uint32_t current_line = (*cursor / 2) / 80;
-    *cursor = (current_line + 1) * 80 * 2;
-}
+#include "io.h"
+#include "vga.h"
 
 void kernel_main() {
-    unsigned char *vga_buffer = (unsigned char*)0xB8000;
+    unsigned char *vga_buffer = (unsigned char*)VGA_BUFFER;
 
     clear_screen(vga_buffer);
 
@@ -97,14 +60,4 @@ void kernel_main() {
         }
         for (volatile int i = 0; i < 1000; i++);
     }
-}
-
-void outb(uint16_t port, uint8_t value) {
-    asm volatile("outb %0, %1" : : "a"(value), "Nd"(port));
-}
-
-uint8_t inb(uint16_t port) {
-    uint8_t ret;
-    asm volatile("inb %w1, %b0" : "=a"(ret) : "Nd"(port));
-    return ret;
 }
