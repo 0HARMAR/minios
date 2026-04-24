@@ -14,14 +14,14 @@ as --64 boot_64.S -o output/boot_64_new.o
 as --64 arch/isr.S -o output/isr.o
 
 # Compile kernel
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/kernel.o kernel/kernel.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/io.o io/io.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/vga.o drivers/vga.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/pic.o arch/pic.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/idt.o arch/idt.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/irq.o arch/irq.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/keyboard.o drivers/keyboard.c
-gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR" -I"$BASE_DIR/include" -o output/interrupts.o kernel/interrupts.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/kernel.o kernel/kernel.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/io.o io/io.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/vga.o drivers/vga.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/pic.o arch/pic.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/idt.o arch/idt.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/irq.o arch/irq.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/keyboard.o drivers/keyboard.c
+gcc -c -m64 -ffreestanding -fno-pie -I"$BASE_DIR/arch" -I"$BASE_DIR/drivers" -I"$BASE_DIR/io" -I"$BASE_DIR/kernel" -o output/interrupts.o kernel/interrupts.c
 
 # Link
 ld -m elf_x86_64 -Ttext 0x7E00 output/boot_32_new.o output/boot_64_new.o \
