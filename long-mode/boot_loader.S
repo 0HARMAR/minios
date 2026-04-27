@@ -56,7 +56,10 @@ _start:
      * ES:BX = buffer address (0000:7E00)
      * -------------------------------------------------------- */
     movb $0x02, %ah          # function: read sectors
-    movb $55,  %al           # number of sectors
+.ifndef SECTORS
+    .set SECTORS, 55
+.endif
+    movb $SECTORS, %al        # number of sectors
     movb $0x00, %ch          # cylinder
     movb $0x02, %cl          # sector (starts from 1)
     movb $0x00, %dh          # head

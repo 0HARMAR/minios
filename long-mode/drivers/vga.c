@@ -32,7 +32,27 @@ void print_string(unsigned char *vga_buf, const char *str, uint32_t *cursor) {
     }
 }
 
+void scroll_screen(unsigned char *vga_buf) {
+    const uint32_t row_size = VGA_WIDTH * 2;
+    for (uint32_t row = 0; row < VGA_HEIGHT - 1; row++) {
+        uint8_t *dst = vga_buf + row * row_size;
+        uint8_t *src = vga_buf + (row + 1) * row_size;
+        for (uint32_t i = 0; i < row_size; i++)
+            dst[i] = src[i];
+    }
+    uint8_t *last = vga_buf + (VGA_HEIGHT - 1) * row_size;
+    for (uint32_t i = 0; i < row_size; i += 2) {
+        last[i] = ' ';
+        last[i + 1] = 0x0B;
+    }
+}
+
 void print_newline(unsigned char *vga_buf, uint32_t *cursor) {
     uint32_t current_line = (*cursor / 2) / VGA_WIDTH;
-    *cursor = (current_line + 1) * VGA_WIDTH * 2;
+    if (current_line >= VGA_HEIGHT - 1) {
+        scroll_screen(vga_buf);
+        *cursor = (VGA_HEIGHT - 1) * VGA_WIDTH * 2;
+    } else {
+        *cursor = (current_line + 1) * VGA_WIDTH * 2;
+    }
 }
