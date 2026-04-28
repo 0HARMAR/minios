@@ -18,7 +18,7 @@ as --64 arch/isr.S  -o "$OUTDIR/isr.o"
 # ============================================================
 # 2. Compile kernel C files
 # ============================================================
-CFLAGS="-c -m64 -ffreestanding -fno-pie -mcmodel=small"
+CFLAGS="-c -m64 -ffreestanding -fno-pie -mcmodel=small -mno-red-zone"
 CFLAGS="$CFLAGS -I$BASE_DIR/arch -I$BASE_DIR/drivers -I$BASE_DIR/io -I$BASE_DIR/kernel"
 
 gcc $CFLAGS -o "$OUTDIR/kernel.o"     kernel/kernel.c
@@ -54,14 +54,18 @@ P_CH=$(sym_addr print_char)
 P_CLR=$(sym_addr clear_screen)
 P_UC=$(sym_addr update_cursor)
 P_VGA=$(sym_addr vga_cursor_pos)
+P_KR=$(sym_addr keyboard_read)
+P_KA=$(sym_addr keyboard_available)
 
 echo "Kernel symbols:"
-echo "  print_string    = $P_STR"
-echo "  print_newline   = $P_NL"
-echo "  print_char      = $P_CH"
-echo "  clear_screen    = $P_CLR"
-echo "  update_cursor   = $P_UC"
-echo "  vga_cursor_pos  = $P_VGA"
+echo "  print_string       = $P_STR"
+echo "  print_newline      = $P_NL"
+echo "  print_char         = $P_CH"
+echo "  clear_screen       = $P_CLR"
+echo "  update_cursor      = $P_UC"
+echo "  vga_cursor_pos     = $P_VGA"
+echo "  keyboard_read      = $P_KR"
+echo "  keyboard_available = $P_KA"
 
 # ============================================================
 # 5. Build programs -> programs.bin
@@ -93,6 +97,8 @@ build_program() {
         --defsym=clear_screen=$P_CLR \
         --defsym=update_cursor=$P_UC \
         --defsym=vga_cursor_pos=$P_VGA \
+        --defsym=keyboard_read=$P_KR \
+        --defsym=keyboard_available=$P_KA \
         "$obj" -o "$elf"
 
     objcopy -O binary "$elf" "$bin"
@@ -118,6 +124,12 @@ sys.stdout.buffer.write(h)
 }
 
 build_program "hello"
+build_program "echo"
+build_program "primes"
+build_program "fib"
+build_program "chars"
+build_program "calc"
+build_program "guess"
 
 # Terminator header (magic=0)
 python3 -c "

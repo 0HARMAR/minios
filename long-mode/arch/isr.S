@@ -10,6 +10,13 @@
         jmp     common_stub
 .endm
 
+.macro isr_stub_err num
+    .global isr_stub_\num
+    isr_stub_\num:
+        pushq   $\num
+        jmp     common_stub
+.endm
+
 .macro irq_stub num
     .global irq_stub_\num
     irq_stub_\num:
@@ -65,16 +72,16 @@ isr_stub 4
 isr_stub 5
 isr_stub 6
 isr_stub 7
-isr_stub 8
+isr_stub_err 8
 isr_stub 9
-isr_stub 10
-isr_stub 11
-isr_stub 12
-isr_stub 13
-isr_stub 14
+isr_stub_err 10
+isr_stub_err 11
+isr_stub_err 12
+isr_stub_err 13
+isr_stub_err 14
 isr_stub 15
 isr_stub 16
-isr_stub 17
+isr_stub_err 17
 isr_stub 18
 isr_stub 19
 isr_stub 20
