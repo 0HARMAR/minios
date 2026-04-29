@@ -5,12 +5,12 @@
  *  Function:
  *      - Runs in 16-bit real mode
  *      - Loaded by BIOS at 0x7C00
- *      - Loads 25 sectors from floppy disk into 0x7E00
+ *      - Loads SECTORS sectors from boot disk into 0x7E00
  *      - Jumps to loaded kernel
  *
  *  Disk Layout:
  *      - Boot sector: LBA 0  (this file)
- *      - Kernel:      LBA 1~25 (CHS sector 2~)
+ *      - Kernel:      LBA 1~SECTORS
  *
  *  Author: <harmar>
  * ------------------------------------------------------------
@@ -36,24 +36,14 @@ _start:
     movw $loading_msg, %si
     call print_string
 
-    /* ---- Reset disk system (INT 13h AH=00h) ---- */
+    /* ---- Save boot drive number and reset disk ---- */
+    movb %dl, boot_drive
     xorw %ax, %ax            # AH=0 reset disk
-    movb $0x00, %dl          # DL=drive number (0 = floppy A:)
     int $0x13
     jc disk_error            # CF set on error
 
     /* --------------------------------------------------------
-     * Read kernel from floppy
-     *
-     * INT 13h AH=02h - Read sectors
-     *
-     * AH = 02h      (read)
-     * AL = sectors  (25)
-     * CH = cylinder (0)
-     * CL = sector   (2)  <-- sector starts at 1
-     * DH = head     (0)
-     * DL = drive    (0)
-     * ES:BX = buffer address (0000:7E00)
+     * Read kernel from disk (CHS: cylinder 0, sector 2, head 0)
      * -------------------------------------------------------- */
     movb $0x02, %ah          # function: read sectors
 .ifndef SECTORS
@@ -64,7 +54,7 @@ _start:
     movb $0x02, %cl          # sector (starts from 1)
     movb $0x00, %dh          # head
     movw $0x7E00, %bx        # load address
-    movb $0x00, %dl          # floppy drive
+    movb boot_drive, %dl      # use BIOS-provided drive number
     int $0x13
     jc disk_error
 
@@ -108,6 +98,7 @@ print_string:
 /* ------------------------------------------------------------
  * Data Section
  * ------------------------------------------------------------ */
+boot_drive:  .byte 0
 loading_msg: .asciz "Loading OS Kernel..."
 error_msg:   .asciz "Disk Error"
 

@@ -30,6 +30,9 @@ gcc $CFLAGS -o "$OUTDIR/irq.o"        arch/irq.c
 gcc $CFLAGS -o "$OUTDIR/keyboard.o"   drivers/keyboard.c
 gcc $CFLAGS -o "$OUTDIR/interrupts.o" kernel/interrupts.c
 gcc $CFLAGS -o "$OUTDIR/exec.o"       kernel/exec.c
+gcc $CFLAGS -o "$OUTDIR/lib.o"        kernel/lib.c
+gcc $CFLAGS -o "$OUTDIR/ata.o"        drivers/ata.c
+gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
 
 # ============================================================
 # 3. Link kernel
@@ -37,7 +40,8 @@ gcc $CFLAGS -o "$OUTDIR/exec.o"       kernel/exec.c
 KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/kernel.o $OUTDIR/io.o $OUTDIR/vga.o $OUTDIR/isr.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
-    $OUTDIR/interrupts.o $OUTDIR/exec.o"
+    $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
+    $OUTDIR/fs.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"
@@ -140,7 +144,7 @@ sys.stdout.buffer.write(struct.pack('<I16sIQ', 0, b'\x00'*16, 0, 0))
 echo "Programs: $OUTDIR/programs.bin ($(stat -c %s "$OUTDIR/programs.bin") bytes)"
 
 # ============================================================
-# 6. Write disk image as one continuous blob
+# 6. Build disk image (10 MB raw, bootable via -hda)
 # ============================================================
 # Concatenate kernel + programs with zero gap so programs land
 # at _kernel_load_end in memory (no sector-alignment gap).
@@ -151,15 +155,22 @@ total_sectors=$(( (total_bytes + 511) / 512 + 1 ))  # +1 for boot sector
 
 echo "Total sectors to load: $total_sectors (payload: $total_bytes bytes)"
 
-# Build bootloader with correct sector count
+# Create 10 MB raw disk image (20480 sectors)
+DISK_SECTORS=20480
+dd if=/dev/zero of="$OUTDIR/disk.img" bs=512 count=$DISK_SECTORS status=none
+
+# Build bootloader with correct sector count, write to sector 0
 bash "$BASE_DIR/compile_bootloader.sh" "$BASE_DIR/boot_loader.S" "$OUTDIR/disk.img" "$total_sectors"
 
 # Write payload starting at sector 1
 dd if="$OUTDIR/payload.bin" of="$OUTDIR/disk.img" bs=512 seek=1 conv=notrunc status=none
 
 echo "============================================"
-echo "Build complete: $OUTDIR/disk.img"
-echo "Kernel:   $(stat -c %s "$OUTDIR/kernel.bin") bytes"
-echo "Programs: $(stat -c %s "$OUTDIR/programs.bin") bytes"
-echo "Payload:  $total_bytes bytes contiguously @ sector 1"
+echo "Build complete: $OUTDIR/disk.img (10 MB)"
+echo "Kernel:    $(stat -c %s "$OUTDIR/kernel.bin") bytes"
+echo "Programs:  $(stat -c %s "$OUTDIR/programs.bin") bytes"
+echo "Payload:   $total_bytes bytes contiguously @ sector 1"
+echo "Filesystem starts @ sector $((2048)) (run 'mkfs' in shell)"
+echo ""
+echo "Run: qemu-system-x86_64 -hda $OUTDIR/disk.img"
 echo "============================================"

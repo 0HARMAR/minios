@@ -1,11 +1,29 @@
 #include <stdint.h>
+#include <stddef.h>
 #include "io.h"
 #include "vga.h"
 #include "interrupts.h"
 #include "keyboard.h"
 #include "exec.h"
+#include "fs.h"
+#include "lib.h"
 
 __attribute__((section(".data"))) uint32_t vga_cursor_pos;
+
+static char *next_word(char **p) {
+    while (**p == ' ') (*p)++;
+    if (**p == '\0') return NULL;
+    char *word = *p;
+    while (**p && **p != ' ') (*p)++;
+    if (**p == ' ') { **p = '\0'; (*p)++; }
+    return word;
+}
+
+static void fs_print_line(const char *s) {
+    unsigned char *vga = (unsigned char *)VGA_BUFFER;
+    print_string(vga, s, &vga_cursor_pos);
+    print_newline(vga, &vga_cursor_pos);
+}
 
 void kernel_main() {
     unsigned char *vga_buffer = (unsigned char*)VGA_BUFFER;
@@ -19,6 +37,12 @@ void kernel_main() {
     exec_init();
     interrupts_init();
     keyboard_init();
+    fs_init();
+
+    if (fs_is_ready())
+        print_string(vga_buffer, "[fs ready]", &vga_cursor_pos);
+    else
+        print_string(vga_buffer, "[fs not ready - type mkfs]", &vga_cursor_pos);
 
     print_string(vga_buffer, "$ ", &vga_cursor_pos);
     update_cursor(vga_cursor_pos);
@@ -39,19 +63,77 @@ void kernel_main() {
                 print_newline(vga_buffer, &vga_cursor_pos);
 
                 if (cmd_index > 0) {
-                    if (exec(cmd_buffer) != 0) {
+                    char *p = cmd_buffer;
+                    char *cmd = next_word(&p);
+
+                    /* ── filesystem commands ── */
+                    if (cmd && strcmp(cmd, "mkfs") == 0) {
+                        fs_mkfs();
+                        print_string(vga_buffer, "filesystem formatted", &vga_cursor_pos);
+                    } else if (cmd && strcmp(cmd, "ls") == 0) {
+                        fs_list(fs_print_line);
+                    } else if (cmd && strcmp(cmd, "touch") == 0) {
+                        char *name = next_word(&p);
+                        if (name) {
+                            int32_t r = fs_create(name);
+                            if (r == -2)
+                                print_string(vga_buffer, "file exists", &vga_cursor_pos);
+                            else if (r < 0)
+                                print_string(vga_buffer, "create failed", &vga_cursor_pos);
+                            else {
+                                print_string(vga_buffer, "created ", &vga_cursor_pos);
+                                print_string(vga_buffer, name, &vga_cursor_pos);
+                            }
+                        }
+                    } else if (cmd && strcmp(cmd, "write") == 0) {
+                        char *name = next_word(&p);
+                        if (name && *p) {
+                            int32_t ino = fs_find(name);
+                            if (ino < 0) {
+                                print_string(vga_buffer, "file not found: ", &vga_cursor_pos);
+                                print_string(vga_buffer, name, &vga_cursor_pos);
+                            } else {
+                                int32_t n = fs_write(ino, (uint8_t *)p, strlen(p));
+                                if (n < 0)
+                                    print_string(vga_buffer, "write failed", &vga_cursor_pos);
+                                else {
+                                    print_string(vga_buffer, "wrote ", &vga_cursor_pos);
+                                    char num[16];
+                                    utoa((uint32_t)n, num);
+                                    print_string(vga_buffer, num, &vga_cursor_pos);
+                                    print_string(vga_buffer, " bytes", &vga_cursor_pos);
+                                }
+                            }
+                        }
+                    } else if (cmd && strcmp(cmd, "cat") == 0) {
+                        char *name = next_word(&p);
+                        if (name) {
+                            int32_t ino = fs_find(name);
+                            if (ino < 0) {
+                                print_string(vga_buffer, "file not found: ", &vga_cursor_pos);
+                                print_string(vga_buffer, name, &vga_cursor_pos);
+                            } else {
+                                char buf[256];
+                                int32_t n = fs_read(ino, (uint8_t *)buf, sizeof(buf) - 1);
+                                if (n < 0)
+                                    print_string(vga_buffer, "read failed", &vga_cursor_pos);
+                                else if (n == 0)
+                                    ;
+                                else {
+                                    buf[n] = '\0';
+                                    print_string(vga_buffer, buf, &vga_cursor_pos);
+                                }
+                            }
+                        }
+                    } else if (cmd && strcmp(cmd, "help") == 0) {
+                        print_string(vga_buffer, "mkfs touch write cat ls help", &vga_cursor_pos);
+                    } else if (exec(cmd_buffer) != 0) {
                         print_string(vga_buffer, "not found: ", &vga_cursor_pos);
                         print_string(vga_buffer, cmd_buffer, &vga_cursor_pos);
-                        print_newline(vga_buffer, &vga_cursor_pos);
-                    } else {
-                        /* program ran — skip past its output lines */
-                        print_newline(vga_buffer, &vga_cursor_pos);
-                        print_newline(vga_buffer, &vga_cursor_pos);
                     }
-                } else {
-                    print_newline(vga_buffer, &vga_cursor_pos);
                 }
 
+                print_newline(vga_buffer, &vga_cursor_pos);
                 print_string(vga_buffer, "$ ", &vga_cursor_pos);
                 cmd_index = 0;
             } else if (c == '\b' && cmd_index > 0) {
