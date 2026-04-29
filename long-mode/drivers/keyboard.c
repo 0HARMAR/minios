@@ -9,6 +9,7 @@
 static char key_buffer[256];
 static int buffer_head = 0;
 static int buffer_tail = 0;
+static int shift_pressed = 0;
 
 static const char scan_to_ascii[128] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
@@ -25,12 +26,32 @@ static const char scan_to_ascii[128] = {
     [0x39] = ' ',   /* Space */
 };
 
+static const char scan_to_ascii_shifted[128] = {
+    0, 0, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+',
+    0, 0, 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}',
+    0, 0, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~',
+    0, '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0, '*',
+    0, ' ', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    /* Extended mappings */
+    [0x1C] = '\n',  /* Enter */
+    [0x0E] = '\b',  /* Backspace */
+    [0x39] = ' ',   /* Space */
+};
+
 static void keyboard_interrupt_handler(struct registers *r) {
     (void)r;
     uint8_t scancode = inb(KEYBOARD_DATA_PORT);
 
-    if (scancode < 128) {
-        char c = scan_to_ascii[scancode];
+    if (scancode == 0x2A || scancode == 0x36) {
+        shift_pressed = 1;
+    } else if (scancode == 0xAA || scancode == 0xB6) {
+        shift_pressed = 0;
+    } else if (scancode < 128) {
+        const char *table = shift_pressed ? scan_to_ascii_shifted : scan_to_ascii;
+        char c = table[scancode];
         if (c != 0) {
             int next_head = (buffer_head + 1) % 256;
             if (next_head != buffer_tail) {
