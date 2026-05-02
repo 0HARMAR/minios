@@ -32,6 +32,7 @@ gcc $CFLAGS -o "$OUTDIR/interrupts.o" kernel/interrupts.c
 gcc $CFLAGS -o "$OUTDIR/exec.o"       kernel/exec.c
 gcc $CFLAGS -o "$OUTDIR/lib.o"        kernel/lib.c
 gcc $CFLAGS -o "$OUTDIR/ata.o"        drivers/ata.c
+gcc $CFLAGS -o "$OUTDIR/timer.o"      drivers/timer.c
 gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
 
 # ============================================================
@@ -41,7 +42,7 @@ KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/kernel.o $OUTDIR/io.o $OUTDIR/vga.o $OUTDIR/isr.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
-    $OUTDIR/fs.o"
+    $OUTDIR/timer.o $OUTDIR/fs.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"

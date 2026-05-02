@@ -7,6 +7,7 @@
 #include "exec.h"
 #include "fs.h"
 #include "lib.h"
+#include "timer.h"
 
 __attribute__((section(".data"))) uint32_t vga_cursor_pos;
 
@@ -37,6 +38,7 @@ void kernel_main() {
     exec_init();
     interrupts_init();
     keyboard_init();
+    timer_init();
     fs_init();
 
     if (fs_is_ready())
@@ -125,8 +127,21 @@ void kernel_main() {
                                 }
                             }
                         }
+                    } else if (cmd && strcmp(cmd, "uptime") == 0) {
+                        uint64_t ticks = timer_get_ticks();
+                        print_string(vga_buffer, "ticks: ", &vga_cursor_pos);
+                        char num[32];
+                        utoa((uint32_t)(ticks % 1000000), num);
+                        print_string(vga_buffer, num, &vga_cursor_pos);
+                    } else if (cmd && strcmp(cmd, "sleep") == 0) {
+                        char *arg = next_word(&p);
+                        if (arg) {
+                            uint32_t n = 0;
+                            for (char *d = arg; *d; d++) n = n * 10 + (*d - '0');
+                            timer_wait(n);
+                        }
                     } else if (cmd && strcmp(cmd, "help") == 0) {
-                        print_string(vga_buffer, "mkfs touch write cat ls help", &vga_cursor_pos);
+                        print_string(vga_buffer, "mkfs touch write cat ls uptime sleep help", &vga_cursor_pos);
                     } else if (exec(cmd_buffer) != 0) {
                         print_string(vga_buffer, "not found: ", &vga_cursor_pos);
                         print_string(vga_buffer, cmd_buffer, &vga_cursor_pos);
