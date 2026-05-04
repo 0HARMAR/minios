@@ -9,6 +9,12 @@
 #include "lib.h"
 #include "timer.h"
 
+/* user-mode entry (arch/user.S) */
+extern uint64_t gdt64[];
+extern uint8_t  tss[104];
+extern void     enter_user_mode(void *entry, void *stack);
+extern void     user_program(void);
+
 __attribute__((section(".data"))) uint32_t vga_cursor_pos;
 
 static char *next_word(char **p) {
@@ -18,6 +24,31 @@ static char *next_word(char **p) {
     while (**p && **p != ' ') (*p)++;
     if (**p == ' ') { **p = '\0'; (*p)++; }
     return word;
+}
+
+static void tss_init(void) {
+    /* zero TSS */
+    for (int i = 0; i < 104; i++)
+        tss[i] = 0;
+
+    /* RSP0 = kernel stack top (offset 4) */
+    *(uint64_t *)(tss + 4) = 0x90000;
+
+    /* IOPB offset past TSS = no I/O bitmap (offset 100) */
+    *(uint16_t *)(tss + 100) = 104;
+
+    /* fill TSS descriptor in GDT[5] and GDT[6] */
+    uint64_t addr  = (uint64_t)tss;
+    uint64_t limit = 103;  /* sizeof(TSS) - 1 */
+
+    gdt64[5] = (limit & 0xFFFFULL)
+             | ((addr & 0xFFFFULL) << 16)
+             | (((addr >> 16) & 0xFFULL) << 32)
+             | (0x89ULL << 40)
+             | (((limit >> 16) & 0xFULL) << 48)
+             | (((addr >> 24) & 0xFFULL) << 56);
+
+    gdt64[6] = (addr >> 32) & 0xFFFFFFFFULL;
 }
 
 static void fs_print_line(const char *s) {
@@ -40,6 +71,7 @@ void kernel_main() {
     keyboard_init();
     timer_init();
     fs_init();
+    tss_init();
 
     if (fs_is_ready())
         print_string(vga_buffer, "[fs ready]", &vga_cursor_pos);
@@ -141,7 +173,10 @@ void kernel_main() {
                             timer_wait(n);
                         }
                     } else if (cmd && strcmp(cmd, "help") == 0) {
-                        print_string(vga_buffer, "mkfs touch write cat ls uptime sleep help", &vga_cursor_pos);
+                        print_string(vga_buffer, "mkfs touch write cat ls uptime sleep help user", &vga_cursor_pos);
+                    } else if (cmd && strcmp(cmd, "user") == 0) {
+                        /* switch to ring 3 — never returns */
+                        enter_user_mode((void *)user_program, (void *)0x300000);
                     } else if (exec(cmd_buffer) != 0) {
                         print_string(vga_buffer, "not found: ", &vga_cursor_pos);
                         print_string(vga_buffer, cmd_buffer, &vga_cursor_pos);

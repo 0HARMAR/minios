@@ -14,6 +14,7 @@ mkdir -p "$OUTDIR"
 as --64 boot_32.S -o "$OUTDIR/boot_32_new.o"
 as --64 boot_64.S -o "$OUTDIR/boot_64_new.o"
 as --64 arch/isr.S  -o "$OUTDIR/isr.o"
+as --64 arch/user.S -o "$OUTDIR/user.o"
 
 # ============================================================
 # 2. Compile kernel C files
@@ -40,6 +41,7 @@ gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
 # ============================================================
 KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/kernel.o $OUTDIR/io.o $OUTDIR/vga.o $OUTDIR/isr.o \
+    $OUTDIR/user.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
     $OUTDIR/timer.o $OUTDIR/fs.o"

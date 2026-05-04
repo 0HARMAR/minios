@@ -1,5 +1,6 @@
 .set PAGE_PRESENT, (1 << 0)
 .set PAGE_WRITE, (1 << 1)
+.set PAGE_USER, (1 << 2)
 .set PAGE_HUGE, (1 << 7)
 
 .section .text
@@ -28,12 +29,12 @@ boot_64:
     # set PML4[0] point to PDP
     movl $pml4, %edi
     movl $pdp, %eax
-    orl $(PAGE_PRESENT | PAGE_WRITE), %eax
+    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_USER), %eax
     movl %eax, (%edi)
 
     # set PDP[0] point to PD
     movl $pd, %eax
-    orl $(PAGE_PRESENT | PAGE_WRITE), %eax
+    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_USER), %eax
     movl $pdp, %edi
     movl %eax, (%edi)
 
@@ -45,7 +46,7 @@ boot_64:
 
 1:
     movl %eax, (%edi)
-    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_HUGE), (%edi)
+    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_HUGE | PAGE_USER), (%edi)
     addl $0x200000, %eax    # per page 2MB
     addl $8, %edi   # per entry 8 bytes
     loop 1b
@@ -149,10 +150,15 @@ pd:
 
 # 64 bit GDT
 .align 8
+.global gdt64
 gdt64:
     .quad 0x0000000000000000    # empty descriptor
-    .quad 0x0020980000000000    # code segement descriptor (execute/read, 64bit)
-    .quad 0x0000920000000000    # data segement descriptor (read/write)
+    .quad 0x0020980000000000    # ring0 code (execute/read, 64bit) sel=0x08
+    .quad 0x0000920000000000    # ring0 data (read/write)          sel=0x10
+    .quad 0x0020FA0000000000    # ring3 code (execute/read, 64bit) sel=0x18
+    .quad 0x0000F20000000000    # ring3 data (read/write)          sel=0x20
+    .quad 0x0000000000000000    # TSS low  (filled at runtime)     sel=0x28
+    .quad 0x0000000000000000    # TSS high
 gdt64_end:
 
 # GDT pointer
