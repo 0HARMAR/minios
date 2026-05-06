@@ -33,3 +33,5 @@ Thumbs.db
 
 /long-mode/output
 .vscode
+DESIGN-aout-format.md
+tools/elf2minios

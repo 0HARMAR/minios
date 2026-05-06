@@ -75,10 +75,19 @@ echo "  keyboard_read      = $P_KR"
 echo "  keyboard_available = $P_KA"
 
 # ============================================================
-# 5. Build programs -> programs.bin
+# 5. Build elf2minios converter tool
+# ============================================================
+ELF2MINIOS="$BASE_DIR/../tools/elf2minios"
+if [ ! -x "$ELF2MINIOS" ]; then
+    echo "Building elf2minios..."
+    gcc -O2 -o "$ELF2MINIOS" "$BASE_DIR/../tools/elf2minios.c" || exit 1
+fi
+
+# ============================================================
+# 6. Build programs -> programs.bin
 # ============================================================
 PROGRAMS_BASE=0x100000
-HDR_SZ=32
+HDR_SZ=64     # sizeof(minios_exec_t)
 offset=0
 
 rm -f "$OUTDIR/programs.bin"
@@ -88,16 +97,16 @@ build_program() {
     local src="$PROG_DIR/${name}.c"
     local obj="$OUTDIR/${name}.o"
     local elf="$OUTDIR/${name}.elf"
-    local bin="$OUTDIR/${name}.bin"
-    local code_addr=$(( PROGRAMS_BASE + offset + HDR_SZ ))
+    local aout="$OUTDIR/${name}.aout"
+    local text_addr=$(( PROGRAMS_BASE + offset + HDR_SZ ))
 
-    echo "Building: $name  (header=0x$(printf '%X' $((PROGRAMS_BASE+offset)))  code=0x$(printf '%X' $code_addr))"
+    echo "Building: $name  (text_addr=0x$(printf '%X' $text_addr))"
 
     gcc -c -m64 -ffreestanding -fno-pie -mcmodel=small -o "$obj" "$src"
 
     local ld_script="$PROG_DIR/program.ld"
     ld -m elf_x86_64 -T "$ld_script" \
-        --defsym=BASE=$(printf '0x%X' $code_addr) \
+        --defsym=BASE=$(printf '0x%X' $text_addr) \
         --defsym=print_string=$P_STR \
         --defsym=print_newline=$P_NL \
         --defsym=print_char=$P_CH \
@@ -108,26 +117,14 @@ build_program() {
         --defsym=keyboard_available=$P_KA \
         "$obj" -o "$elf"
 
-    objcopy -O binary "$elf" "$bin"
-    local code_sz=$(stat -c %s "$bin")
-    local entry=$(nm "$elf" | grep " _start\$" | awk '{print "0x"$1}')
+    "$ELF2MINIOS" "$elf" "$aout" "$name"
 
-    if [ -z "$entry" ]; then
-        echo "ERROR: no _start symbol in $name"
-        exit 1
-    fi
+    local aout_sz=$(stat -c %s "$aout")
 
-    echo "  code_size=$code_sz  entry=$entry"
+    echo "  text=0x$(printf '%X' $text_addr)  aout_size=$aout_sz"
 
-    # 32-byte header: magic(u32) + name[16] + code_size(u32) + entry(u64)
-    python3 -c "
-import struct, sys
-h = struct.pack('<I16sIQ', 0x4D494E49, b'${name}\x00'.ljust(16,b'\x00')[:16], $code_sz, $entry)
-sys.stdout.buffer.write(h)
-" > "$OUTDIR/${name}_hdr.bin"
-
-    cat "$OUTDIR/${name}_hdr.bin" "$bin" >> "$OUTDIR/programs.bin"
-    offset=$(( offset + HDR_SZ + code_sz ))
+    cat "$aout" >> "$OUTDIR/programs.bin"
+    offset=$(( offset + aout_sz ))
 }
 
 build_program "hello"
@@ -141,7 +138,7 @@ build_program "guess"
 # Terminator header (magic=0)
 python3 -c "
 import struct, sys
-sys.stdout.buffer.write(struct.pack('<I16sIQ', 0, b'\x00'*16, 0, 0))
+sys.stdout.buffer.write(struct.pack('<I', 0).ljust(64, b'\x00'))
 " >> "$OUTDIR/programs.bin"
 
 echo "Programs: $OUTDIR/programs.bin ($(stat -c %s "$OUTDIR/programs.bin") bytes)"

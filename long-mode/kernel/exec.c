@@ -2,7 +2,7 @@
 
 /* name -> entry_address table, built once at init */
 static struct {
-    char     name[EXEC_NAME_MAX];
+    char     name[AOUT_NAME_MAX];
     void   (*entry)(void);
 } prog_table[MAX_PROGS];
 
@@ -14,43 +14,54 @@ extern uint8_t _kernel_load_end[];
 extern uint8_t _kernel_end[];
 
 void exec_init(void) {
-    uint8_t       *src = _kernel_load_end;
-    uint8_t       *dst = (uint8_t *)PROGRAMS_BASE;
-    exec_header_t *hdr;
-    uint32_t       total = 0;
+    uint8_t      *src = _kernel_load_end;
+    uint8_t      *dst = (uint8_t *)PROGRAMS_BASE;
+    minios_exec_t *hdr;
+    uint32_t       moved = 0;
 
     /* Phase 1: copy programs out of the BSS-overlap region before
      * BSS zeroing destroys them.  The programs binary was loaded
      * right after the kernel on disk, which lands on _kernel_load_end
      * — the same memory the linker assigned to .bss. */
     while (1) {
-        hdr = (exec_header_t *)src;
-        if (hdr->magic != EXEC_MAGIC)
+        hdr = (minios_exec_t *)src;
+        if (hdr->a_magic != AOUT_MAGIC)
             break;
-        uint32_t bytes = sizeof(exec_header_t) + hdr->code_size;
-        for (uint32_t i = 0; i < bytes; i++)
+
+        /* copy header + text + data (BSS has no file presence) */
+        uint32_t file_bytes = A_HDRSIZE + hdr->a_text + hdr->a_data;
+        for (uint32_t i = 0; i < file_bytes; i++)
             dst[i] = src[i];
-        total += bytes;
-        src += bytes;
-        dst += bytes;
+
+        moved += file_bytes;
+        src += file_bytes;
+        dst += file_bytes;
     }
 
-    /* Phase 2: now it's safe to zero BSS */
+    /* Phase 2: now it's safe to zero the kernel's BSS */
     for (uint8_t *p = _kernel_load_end; p < _kernel_end; p++)
         *p = 0;
 
-    /* Phase 3: build name->entry table from the safely-copied data */
+    /* Phase 3: zero programs' BSS and build name->entry table */
     prog_count = 0;
-    hdr = (exec_header_t *)PROGRAMS_BASE;
-    for (uint32_t off = 0; off < total; ) {
-        if (hdr->magic != EXEC_MAGIC || prog_count >= MAX_PROGS)
+    uint8_t *prog = (uint8_t *)PROGRAMS_BASE;
+    for (uint32_t off = 0; off < moved; ) {
+        hdr = (minios_exec_t *)(prog + off);
+        if (hdr->a_magic != AOUT_MAGIC || prog_count >= MAX_PROGS)
             break;
-        for (int i = 0; i < EXEC_NAME_MAX; i++)
-            prog_table[prog_count].name[i] = hdr->name[i];
-        prog_table[prog_count].entry = (void (*)(void))(uintptr_t)hdr->entry;
+
+        /* zero-fill BSS after text+data */
+        uint8_t *bss_start = prog + off + A_HDRSIZE + hdr->a_text + hdr->a_data;
+        for (uint32_t i = 0; i < hdr->a_bss; i++)
+            bss_start[i] = 0;
+
+        /* record name -> entry */
+        for (int i = 0; i < AOUT_NAME_MAX; i++)
+            prog_table[prog_count].name[i] = hdr->a_name[i];
+        prog_table[prog_count].entry = (void (*)(void))(uintptr_t)hdr->a_entry;
         prog_count++;
-        off += sizeof(exec_header_t) + hdr->code_size;
-        hdr = (exec_header_t *)((uint8_t *)PROGRAMS_BASE + off);
+
+        off += A_HDRSIZE + hdr->a_text + hdr->a_data;
     }
 }
 
