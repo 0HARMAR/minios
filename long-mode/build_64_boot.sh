@@ -86,7 +86,7 @@ fi
 # ============================================================
 # 6. Build programs -> programs.bin
 # ============================================================
-PROGRAMS_BASE=0x100000
+PROGRAMS_BASE=0x200000
 HDR_SZ=64     # sizeof(minios_exec_t)
 offset=0
 

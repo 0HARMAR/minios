@@ -7,7 +7,7 @@
 #define MAX_PROGS      16
 
 /* Programs are loaded here at runtime */
-#define PROGRAMS_BASE  0x100000
+#define PROGRAMS_BASE  0x200000
 
 extern uint32_t vga_cursor_pos;
 

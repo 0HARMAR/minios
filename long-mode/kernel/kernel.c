@@ -176,7 +176,7 @@ void kernel_main() {
                         print_string(vga_buffer, "mkfs touch write cat ls uptime sleep help user", &vga_cursor_pos);
                     } else if (cmd && strcmp(cmd, "user") == 0) {
                         /* switch to ring 3 — never returns */
-                        enter_user_mode((void *)user_program, (void *)0x300000);
+                        enter_user_mode((void *)user_program, (void *)0x400000);
                     } else if (exec(cmd_buffer) != 0) {
                         print_string(vga_buffer, "not found: ", &vga_cursor_pos);
                         print_string(vga_buffer, cmd_buffer, &vga_cursor_pos);

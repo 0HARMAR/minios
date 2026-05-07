@@ -35,3 +35,4 @@ Thumbs.db
 .vscode
 DESIGN-aout-format.md
 tools/elf2minios
+DESIGN_PAGING_ISOLATION.md

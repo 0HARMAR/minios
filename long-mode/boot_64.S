@@ -39,10 +39,20 @@ boot_64:
     movl %eax, (%edi)
 
     # set PD table, use 2MB huge page mode to map
-    # first 1 GB memory
+    # first 1 GB memory.
+    #
+    # PD[0]  : 0x0 - 0x1FFFFF  kernel region, supervisor-only
+    # PD[1+]: 0x200000+        user region, user-accessible
     movl $pd, %edi
-    movl $0, %eax   # from physical address 0
-    movl $512, %ecx     # 512 entrys
+
+    # PD[0] — kernel (no PAGE_USER → ring3 cannot access)
+    movl $0, (%edi)
+    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_HUGE), (%edi)
+    addl $8, %edi
+
+    # PD[1..511] — user, 511 * 2MB = 1022MB
+    movl $0x200000, %eax
+    movl $511, %ecx
 
 1:
     movl %eax, (%edi)
