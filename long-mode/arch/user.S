@@ -30,6 +30,25 @@ user_program:
 
 1:  jmp     1b
 
+/* syscall_user_program — position-independent ring 3 code.
+ * copied to user memory (0x300000) at runtime. */
+.global syscall_user_program
+syscall_user_program:
+    movq    $1, %rax            /* SYS_OUTPUT */
+    movq    $0, %rdi            /* dd = stdout */
+    leaq    msg(%rip), %rsi     /* buf */
+    movq    $msg_len, %rdx      /* len */
+    int     $0x80
+
+2:  jmp     2b
+
+msg:
+    .ascii "hello, world from ring 3!\n"
+    .set msg_len, . - msg
+
+.global syscall_user_program_end
+syscall_user_program_end:
+
 .global enter_user_mode
 enter_user_mode:
     # rdi = user RIP, rsi = user RSP

@@ -1,3 +1,4 @@
+#include "syscall.h"
 #include "irq.h"
 #include "pic.h"
 #include "io.h"
@@ -14,6 +15,12 @@ void irq_register_handler(uint8_t irq, irq_handler_t handler) {
 }
 
 void irq_handler(struct registers *r) {
+    /* software interrupt 0x80 — syscall, not an IRQ */
+    if (r->interrupt == 0x80) {
+        syscall_handler(r);
+        return;
+    }
+
     uint8_t irq = r->interrupt - 32;
 
     if (irq_handlers[irq] != 0) {

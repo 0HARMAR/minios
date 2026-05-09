@@ -26,5 +26,8 @@ void idt_init(void) {
         idt_set_gate(i, isr_stub_table[i], 0x08, 0, 0x8E);
     }
 
+    /* vector 0x80: DPL=3 so ring 3 can trigger int $0x80 */
+    idt_set_gate(0x80, isr_stub_table[0x80], 0x08, 0, 0xEE);
+
     asm volatile("lidt %0" : : "m"(idt_descriptor));
 }
