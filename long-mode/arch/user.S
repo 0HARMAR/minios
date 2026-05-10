@@ -31,20 +31,72 @@ user_program:
 1:  jmp     1b
 
 /* syscall_user_program — position-independent ring 3 code.
- * copied to user memory (0x300000) at runtime. */
+ * copied to user memory (0x300000) at runtime.
+ *
+ * demo: output a message, then loop reading a key and echoing it. */
 .global syscall_user_program
 syscall_user_program:
+    /* output hello */
     movq    $1, %rax            /* SYS_OUTPUT */
     movq    $0, %rdi            /* dd = stdout */
-    leaq    msg(%rip), %rsi     /* buf */
-    movq    $msg_len, %rdx      /* len */
+    leaq    msg_hello(%rip), %rsi
+    movq    $msg_hello_len, %rdx
     int     $0x80
 
-2:  jmp     2b
+1:
+    /* output prompt */
+    movq    $1, %rax
+    movq    $0, %rdi
+    leaq    msg_prompt(%rip), %rsi
+    movq    $msg_prompt_len, %rdx
+    int     $0x80
 
-msg:
+    /* input 1 char from keyboard into the stack buffer */
+    movq    $2, %rax            /* SYS_INPUT */
+    movq    $1, %rdi            /* dd = keyboard */
+    leaq    buf(%rip), %rsi     /* buf (in .text, user-accessible) */
+    movq    $1, %rdx            /* len = 1 */
+    int     $0x80
+
+    /* output "you typed: " */
+    movq    $1, %rax
+    movq    $0, %rdi
+    leaq    msg_echo(%rip), %rsi
+    movq    $msg_echo_len, %rdx
+    int     $0x80
+
+    /* output the char we just read */
+    movq    $1, %rax
+    movq    $0, %rdi
+    leaq    buf(%rip), %rsi
+    movq    $1, %rdx
+    int     $0x80
+
+    /* output newline */
+    movq    $1, %rax
+    movq    $0, %rdi
+    leaq    buf(%rip), %rsi      /* reuse buf: load \n into first byte */
+    movb    $'\n', (%rsi)
+    movq    $1, %rdx
+    int     $0x80
+
+    jmp     1b
+
+msg_hello:
     .ascii "hello, world from ring 3!\n"
-    .set msg_len, . - msg
+    .set msg_hello_len, . - msg_hello
+
+msg_prompt:
+    .ascii "type a key: "
+    .set msg_prompt_len, . - msg_prompt
+
+msg_echo:
+    .ascii "you typed: "
+    .set msg_echo_len, . - msg_echo
+
+.align 8
+buf:
+    .byte 0
 
 .global syscall_user_program_end
 syscall_user_program_end:

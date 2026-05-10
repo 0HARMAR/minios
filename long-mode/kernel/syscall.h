@@ -6,6 +6,11 @@
 
 /* syscall numbers */
 #define SYS_OUTPUT  1
+#define SYS_INPUT   2
+
+/* device descriptors */
+#define DD_STDOUT   0
+#define DD_KEYBOARD 1
 
 /* error codes (returned as negative values) */
 #define EBADF   1

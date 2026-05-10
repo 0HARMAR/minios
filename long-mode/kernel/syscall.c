@@ -1,4 +1,5 @@
 #include "vga.h"
+#include "keyboard.h"
 #include "syscall.h"
 #include "irq.h"
 
@@ -7,8 +8,8 @@
 
 #define MAX_DEVICES     8
 
-/* device write function type */
 typedef int64_t (*dev_write_t)(const void *buf, uint64_t len);
+typedef int64_t (*dev_read_t)(void *buf, uint64_t len);
 
 extern uint32_t vga_cursor_pos;
 
@@ -33,9 +34,35 @@ static int64_t vga_write(const void *buf, uint64_t len) {
     return (int64_t)len;
 }
 
-/* ── device descriptor table ──────────────────────────────────── */
-static dev_write_t device_table[MAX_DEVICES] = {
-    vga_write,  /* dd=0: stdout */
+/* ── device: stdin (keyboard) ─────────────────────────────────── */
+static int64_t keyboard_read_buf(void *buf, uint64_t len) {
+    char *p = (char *)buf;
+
+    if (len == 0)
+        return 0;
+
+    /* keyboard_read() busy-waits; interrupts must be on for IRQ1
+     * to deliver scancodes into the keyboard buffer. */
+    asm volatile("sti");
+
+    /* block for first character */
+    p[0] = keyboard_read();
+
+    /* grab any more immediately available, up to len */
+    uint64_t n = 1;
+    while (n < len && keyboard_available())
+        p[n++] = keyboard_read();
+
+    return (int64_t)n;
+}
+
+/* ── device descriptor tables ─────────────────────────────────── */
+static dev_write_t write_table[MAX_DEVICES] = {
+    [DD_STDOUT]   = vga_write,
+};
+
+static dev_read_t read_table[MAX_DEVICES] = {
+    [DD_KEYBOARD] = keyboard_read_buf,
 };
 
 static int validate_user_buffer(const void *buf, uint64_t len) {
@@ -50,15 +77,21 @@ static int validate_user_buffer(const void *buf, uint64_t len) {
     return 0;
 }
 
-/* ── individual syscall: output(dd, buf, len) ─────────────────── */
+/* ── syscalls ─────────────────────────────────────────────────── */
 static int64_t sys_output(uint8_t dd, const void *buf, uint64_t len) {
-    if (dd >= MAX_DEVICES || device_table[dd] == 0)
+    if (dd >= MAX_DEVICES || write_table[dd] == 0)
         return -EBADF;
-
     if (validate_user_buffer(buf, len) != 0)
         return -EFAULT;
+    return write_table[dd](buf, len);
+}
 
-    return device_table[dd](buf, len);
+static int64_t sys_input(uint8_t dd, void *buf, uint64_t len) {
+    if (dd >= MAX_DEVICES || read_table[dd] == 0)
+        return -EBADF;
+    if (validate_user_buffer(buf, len) != 0)
+        return -EFAULT;
+    return read_table[dd](buf, len);
 }
 
 /* ── syscall dispatcher ───────────────────────────────────────── */
@@ -70,8 +103,14 @@ void syscall_handler(struct registers *regs) {
             (const void *)regs->rsi,
             regs->rdx);
         break;
+    case SYS_INPUT:
+        regs->rax = sys_input(
+            (uint8_t)regs->rdi,
+            (void *)regs->rsi,
+            regs->rdx);
+        break;
     default:
-        regs->rax = -1;  /* unknown syscall */
+        regs->rax = -1;
         break;
     }
 }
