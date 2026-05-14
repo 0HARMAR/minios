@@ -14,9 +14,6 @@
 extern uint64_t gdt64[];
 extern uint8_t  tss[104];
 extern void     enter_user_mode(void *entry, void *stack);
-extern void     user_program(void);
-extern char     _binary_ring3_bin_start[];
-extern char     _binary_ring3_bin_end[];
 
 __attribute__((section(".data"))) uint32_t vga_cursor_pos;
 
@@ -178,11 +175,9 @@ void kernel_main() {
                     } else if (cmd && strcmp(cmd, "help") == 0) {
                         print_string(vga_buffer, "mkfs touch write cat ls uptime sleep help user", &vga_cursor_pos);
                     } else if (cmd && strcmp(cmd, "user") == 0) {
-                        /* copy ring-3 program to user memory */
-                        uint64_t stub_sz = (uint64_t)(_binary_ring3_bin_end - _binary_ring3_bin_start);
-                        for (uint64_t i = 0; i < stub_sz; i++)
-                            ((char *)0x300000)[i] = _binary_ring3_bin_start[i];
-                        enter_user_mode((void *)0x300000, (void *)0x400000);
+                        if (exec_user("ring3") != 0) {
+                            print_string(vga_buffer, "ring3 not found", &vga_cursor_pos);
+                        }
                     } else if (exec(cmd_buffer) != 0) {
                         print_string(vga_buffer, "not found: ", &vga_cursor_pos);
                         print_string(vga_buffer, cmd_buffer, &vga_cursor_pos);

@@ -12,6 +12,7 @@
 extern uint32_t vga_cursor_pos;
 
 void exec_init(void);
-int  exec(const char *name);   /* 0 on success, -1 if not found */
+int  exec(const char *name);       /* 0 on success, -1 if not found    */
+int  exec_user(const char *name);  /* 0 on success, -1 if not found    */
 
 #endif

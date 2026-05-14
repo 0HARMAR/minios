@@ -45,8 +45,7 @@ KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/user.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
-    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o \
-    $OUTDIR/ring3_bin.o"
+    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"
@@ -135,6 +134,27 @@ build_program "primes"
 build_program "fib"
 build_program "chars"
 build_program "calc"
+
+# ============================================================
+# 6. Build ring-3 user program via elf2minios -> ring3.aout
+# (built before guess because ring3 has a_bss=0; guess has a_bss=4
+#  which would otherwise zero into ring3's header — see RECORD12.2)
+# ============================================================
+RING3_CFLAGS="-c -m64 -ffreestanding -fno-pie -mcmodel=small -mno-red-zone -O2 -fcf-protection=none"
+RING3_CFLAGS="$RING3_CFLAGS -I$BASE_DIR/kernel"
+
+echo "Building: ring3  (text_addr=0x300000)"
+
+gcc $RING3_CFLAGS -o "$OUTDIR/ring3.o" "$PROG_DIR/ring3.c"
+ld -m elf_x86_64 -T "$PROG_DIR/ring3.ld" "$OUTDIR/ring3.o" -o "$OUTDIR/ring3.elf"
+"$ELF2MINIOS" "$OUTDIR/ring3.elf" "$OUTDIR/ring3.aout" "ring3"
+
+ring3_sz=$(stat -c %s "$OUTDIR/ring3.aout")
+echo "  aout_size=$ring3_sz"
+
+cat "$OUTDIR/ring3.aout" >> "$OUTDIR/programs.bin"
+offset=$(( offset + ring3_sz ))
+
 build_program "guess"
 
 # Terminator header (magic=0)
@@ -144,24 +164,6 @@ sys.stdout.buffer.write(struct.pack('<I', 0).ljust(64, b'\x00'))
 " >> "$OUTDIR/programs.bin"
 
 echo "Programs: $OUTDIR/programs.bin ($(stat -c %s "$OUTDIR/programs.bin") bytes)"
-
-# ============================================================
-# 6. Build ring-3 user program (C, uses syscalls via int 0x80)
-# ============================================================
-RING3_CFLAGS="-c -m64 -ffreestanding -fno-pie -mcmodel=small -mno-red-zone -O2 -fcf-protection=none"
-RING3_CFLAGS="$RING3_CFLAGS -I$BASE_DIR/kernel"
-
-echo "Building ring3 user program (linked @ 0x300000)"
-
-gcc $RING3_CFLAGS -o "$OUTDIR/ring3.o" "$PROG_DIR/ring3.c"
-ld -m elf_x86_64 -T "$PROG_DIR/ring3.ld" "$OUTDIR/ring3.o" -o "$OUTDIR/ring3.elf"
-objcopy -O binary "$OUTDIR/ring3.elf" "$OUTDIR/ring3.bin"
-
-echo "  ring3 binary: $(stat -c %s "$OUTDIR/ring3.bin") bytes"
-
-# Embed as linkable object (_binary_ring3_bin_start / _end symbols)
-( cd "$OUTDIR" && objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
-    ring3.bin ring3_bin.o )
 
 # ============================================================
 # 7. Build disk image (10 MB raw, bootable via -hda)

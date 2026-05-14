@@ -4,7 +4,10 @@
 static struct {
     char     name[AOUT_NAME_MAX];
     void   (*entry)(void);
+    uint32_t offset;
 } prog_table[MAX_PROGS];
+
+extern void enter_user_mode(void *entry, void *stack);
 
 static int prog_count;
 
@@ -59,6 +62,7 @@ void exec_init(void) {
         for (int i = 0; i < AOUT_NAME_MAX; i++)
             prog_table[prog_count].name[i] = hdr->a_name[i];
         prog_table[prog_count].entry = (void (*)(void))(uintptr_t)hdr->a_entry;
+        prog_table[prog_count].offset = off;
         prog_count++;
 
         off += A_HDRSIZE + hdr->a_text + hdr->a_data;
@@ -74,6 +78,36 @@ int exec(const char *name) {
             prog_table[i].entry();
             return 0;
         }
+    }
+    return -1;
+}
+
+int exec_user(const char *name) {
+    for (int i = 0; i < prog_count; i++) {
+        const char *a = name;
+        const char *b = prog_table[i].name;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (*a != '\0' || *b != '\0')
+            continue;
+
+        minios_exec_t *hdr = (minios_exec_t *)((uint8_t *)PROGRAMS_BASE + prog_table[i].offset);
+        uint8_t *src = (uint8_t *)hdr;
+
+        uint64_t load_addr = hdr->a_text_addr;
+        uint8_t *text = src + A_HDRSIZE;
+        uint8_t *data = text + hdr->a_text;
+
+        for (uint32_t j = 0; j < hdr->a_text; j++)
+            ((uint8_t *)(uintptr_t)load_addr)[j] = text[j];
+
+        for (uint32_t j = 0; j < hdr->a_data; j++)
+            ((uint8_t *)(uintptr_t)(load_addr + hdr->a_text))[j] = data[j];
+
+        for (uint32_t j = 0; j < hdr->a_bss; j++)
+            ((uint8_t *)(uintptr_t)(load_addr + hdr->a_text + hdr->a_data))[j] = 0;
+
+        enter_user_mode((void *)(uintptr_t)hdr->a_entry, (void *)0x400000);
+        return 0;
     }
     return -1;
 }
