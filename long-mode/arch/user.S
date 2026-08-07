@@ -45,6 +45,57 @@ enter_user_mode:
     pushq   %rdi               # RIP = user entry
     iretq
 
+# ── context switch ───────────────────────────────────────────────────
+# void switch_to(struct process *next)
+# rdi = next
+# struct offsets: k_rsp=136  k_stack_top=144  cr3=152  k_rbp=160
+.global switch_to
+switch_to:
+    # save current->k_rsp / k_rbp
+    movq    current(%rip), %rax
+    movq    %rsp, 136(%rax)
+    movq    %rbp, 160(%rax)
+
+    # TSS.rsp0 = next->k_stack_top
+    movq    144(%rdi), %rax
+    movq    %rax, 4 + tss(%rip)
+
+    # cr3 = next->cr3
+    movq    152(%rdi), %rax
+    movq    %rax, %cr3
+
+    # switch to next's kernel stack, restore next's frame pointer
+    movq    136(%rdi), %rsp
+    movq    160(%rdi), %rbp
+
+    # current = next
+    movq    %rdi, current(%rip)
+
+    ret
+
+# ── first-entry trampoline ───────────────────────────────────────────
+# A new process's fabricated kernel stack has switch_to's ret pop the
+# address of resume_user.  Below RSP: struct registers + iretq frame.
+.global resume_user
+resume_user:
+    popq    %r15
+    popq    %r14
+    popq    %r13
+    popq    %r12
+    popq    %r11
+    popq    %r10
+    popq    %r9
+    popq    %r8
+    popq    %rdi
+    popq    %rsi
+    popq    %rbp
+    popq    %rbx
+    popq    %rdx
+    popq    %rcx
+    popq    %rax
+    addq    $16, %rsp           # skip interrupt + error_code
+    iretq
+
 .section .data
 .align 8
 .global tss

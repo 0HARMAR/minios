@@ -15,4 +15,8 @@ void exec_init(void);
 int  exec(const char *name);       /* 0 on success, -1 if not found    */
 int  exec_user(const char *name);  /* 0 on success, -1 if not found    */
 
+/* look up a program by name.  returns pointer to its a.out header
+ * (at PROGRAMS_BASE + offset), or NULL if not found. */
+minios_exec_t *exec_lookup(const char *name);
+
 #endif

@@ -2,9 +2,10 @@
 #include "keyboard.h"
 #include "syscall.h"
 #include "irq.h"
-
-#define USER_MEM_START  0x200000
-#define USER_MEM_END    0x40000000   /* 1 GB */
+#include "process.h"
+#include "paging.h"
+#include "lib.h"
+#include "io.h"
 
 #define MAX_DEVICES     8
 
@@ -25,6 +26,10 @@ static int64_t vga_write(const void *buf, uint64_t len) {
             break;
         case '\r':
             break;
+        case '\b':
+            if (vga_cursor_pos >= 2)
+                vga_cursor_pos -= 2;
+            break;
         default:
             print_char(vga, p[i], &vga_cursor_pos, 0x0F);
             break;
@@ -41,14 +46,10 @@ static int64_t keyboard_read_buf(void *buf, uint64_t len) {
     if (len == 0)
         return 0;
 
-    /* keyboard_read() busy-waits; interrupts must be on for IRQ1
-     * to deliver scancodes into the keyboard buffer. */
     asm volatile("sti");
 
-    /* block for first character */
     p[0] = keyboard_read();
 
-    /* grab any more immediately available, up to len */
     uint64_t n = 1;
     while (n < len && keyboard_available())
         p[n++] = keyboard_read();
@@ -56,23 +57,60 @@ static int64_t keyboard_read_buf(void *buf, uint64_t len) {
     return (int64_t)n;
 }
 
+/* ── device: serial port (COM1, I/O 0x3F8) ──────────────────────── */
+#define COM1_PORT 0x3F8
+
+static int serial_inited;
+static void serial_init(void) {
+    outb(COM1_PORT + 1, 0x00);   /* disable interrupts */
+    outb(COM1_PORT + 3, 0x80);   /* DLAB=1 to set baud divisor */
+    outb(COM1_PORT + 0, 0x03);   /* divisor low  = 3  → 38400 baud */
+    outb(COM1_PORT + 1, 0x00);   /* divisor high = 0 */
+    outb(COM1_PORT + 3, 0x03);   /* 8N1, DLAB=0 */
+    serial_inited = 1;
+}
+
+int64_t serial_write(const void *buf, uint64_t len) {
+    if (!serial_inited) serial_init();
+    const char *p = (const char *)buf;
+    for (uint64_t i = 0; i < len; i++) {
+        if (p[i] == '\n') {
+            while (!(inb(COM1_PORT + 5) & 0x20)) { }
+            outb(COM1_PORT, '\r');
+        }
+        while (!(inb(COM1_PORT + 5) & 0x20)) { }
+        outb(COM1_PORT, p[i]);
+    }
+    return (int64_t)len;
+}
+
 /* ── device descriptor tables ─────────────────────────────────── */
 static dev_write_t write_table[MAX_DEVICES] = {
     [DD_STDOUT]   = vga_write,
+    [DD_COM1]     = serial_write,
 };
 
 static dev_read_t read_table[MAX_DEVICES] = {
     [DD_KEYBOARD] = keyboard_read_buf,
 };
 
+/* ── buffer validation (per-process bounds) ───────────────────── */
 static int validate_user_buffer(const void *buf, uint64_t len) {
     uint64_t start = (uint64_t)buf;
     uint64_t end   = start + len;
 
     if (end < start)
         return -EFAULT;
-    if (start < USER_MEM_START || end > USER_MEM_END)
-        return -EFAULT;
+
+    /* use per-process bounds if running a user process */
+    if (current != 0 && current->pid != 0) {
+        if (start < current->user_start || end > current->user_end)
+            return -EFAULT;
+    } else {
+        /* fallback for shell (pid 0) — kernel range only */
+        if (start < 0x200000 || end > 0x40000000)
+            return -EFAULT;
+    }
 
     return 0;
 }
@@ -94,6 +132,31 @@ static int64_t sys_input(uint8_t dd, void *buf, uint64_t len) {
     return read_table[dd](buf, len);
 }
 
+static int64_t sys_crtproc(const char *path, uint64_t flags) {
+    if (flags != 0)
+        return -EINVAL;
+    if (validate_user_buffer(path, 128) != 0)
+        return -EFAULT;
+
+    return proc_spawn(path);
+}
+
+void proc_exit_current(int64_t status) {
+    if (current == 0 || current->pid == 0)
+        return;
+
+    current->state       = PROC_ZOMBIE;
+    current->exit_status = status;
+
+    /* free resources */
+    pt_destroy(current->cr3);
+    kstack_free(current->pid);
+
+    schedule();
+    asm ("sti");
+    for(;;);
+}
+
 /* ── syscall dispatcher ───────────────────────────────────────── */
 void syscall_handler(struct registers *regs) {
     switch (regs->rax) {
@@ -108,6 +171,14 @@ void syscall_handler(struct registers *regs) {
             (uint8_t)regs->rdi,
             (void *)regs->rsi,
             regs->rdx);
+        break;
+    case SYS_CRTPROC:
+        regs->rax = sys_crtproc(
+            (const char *)regs->rdi,
+            regs->rsi);
+        break;
+    case SYS_EXIT:
+        proc_exit_current((int64_t)regs->rdi);
         break;
     default:
         regs->rax = -1;

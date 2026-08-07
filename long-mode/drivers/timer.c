@@ -2,6 +2,7 @@
 #include "io.h"
 #include "irq.h"
 #include "pic.h"
+#include "process.h"
 
 #define PIT_CH0     0x40
 #define PIT_CMD     0x43
@@ -13,6 +14,7 @@ static volatile uint64_t ticks = 0;
 static void timer_handler(struct registers *r) {
     (void)r;
     ticks++;
+    sched_tick();
 }
 
 void timer_init(void) {

@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include "exec.h"
 
 /* name -> entry_address table, built once at init */
@@ -80,6 +81,18 @@ int exec(const char *name) {
         }
     }
     return -1;
+}
+
+minios_exec_t *exec_lookup(const char *name)
+{
+    for (int i = 0; i < prog_count; i++) {
+        const char *a = name;
+        const char *b = prog_table[i].name;
+        while (*a && *b && *a == *b) { a++; b++; }
+        if (*a == '\0' && *b == '\0')
+            return (minios_exec_t *)((uint8_t *)PROGRAMS_BASE + prog_table[i].offset);
+    }
+    return NULL;
 }
 
 int exec_user(const char *name) {

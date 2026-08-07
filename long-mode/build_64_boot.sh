@@ -9,11 +9,30 @@ PROG_DIR="$BASE_DIR/kernel/programs"
 mkdir -p "$OUTDIR"
 
 # ============================================================
-# 1. Assemble boot stages
+# 1. Generate ISR stubs & table (eliminates 500+ lines of repetition)
+# ============================================================
+python3 -c "
+e = {8,10,11,12,13,14,17}
+for i in range(256):
+    if i in e:
+        print(f'    stub_err {i}')
+    elif i < 32:
+        print(f'    stub_noerr {i}')
+    else:
+        print(f'    stub_noerr {i}')
+" > "$OUTDIR/isr_gen.inc"
+
+python3 -c "
+for i in range(256):
+    print(f'    .quad vector_{i}')
+" > "$OUTDIR/isr_table.inc"
+
+# ============================================================
+# 2. Assemble boot stages
 # ============================================================
 as --64 boot_32.S -o "$OUTDIR/boot_32_new.o"
 as --64 boot_64.S -o "$OUTDIR/boot_64_new.o"
-as --64 arch/isr.S  -o "$OUTDIR/isr.o"
+as --64 -I "$OUTDIR" arch/isr.S -o "$OUTDIR/isr.o"
 as --64 arch/user.S -o "$OUTDIR/user.o"
 
 # ============================================================
@@ -36,6 +55,8 @@ gcc $CFLAGS -o "$OUTDIR/ata.o"        drivers/ata.c
 gcc $CFLAGS -o "$OUTDIR/timer.o"      drivers/timer.c
 gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
 gcc $CFLAGS -o "$OUTDIR/syscall.o"   kernel/syscall.c
+gcc $CFLAGS -o "$OUTDIR/process.o"   kernel/process.c
+gcc $CFLAGS -o "$OUTDIR/paging.o"    kernel/paging.c
 
 # ============================================================
 # 3. Link kernel
@@ -45,7 +66,7 @@ KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/user.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
-    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o"
+    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o $OUTDIR/process.o $OUTDIR/paging.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"
@@ -154,6 +175,19 @@ echo "  aout_size=$ring3_sz"
 
 cat "$OUTDIR/ring3.aout" >> "$OUTDIR/programs.bin"
 offset=$(( offset + ring3_sz ))
+
+# build ush (user shell) — same flags as ring3
+echo "Building: ush  (text_addr=0x300100)"
+
+gcc $RING3_CFLAGS -o "$OUTDIR/ush.o" "$PROG_DIR/ush.c"
+ld -m elf_x86_64 -T "$PROG_DIR/ush.ld" "$OUTDIR/ush.o" -o "$OUTDIR/ush.elf"
+"$ELF2MINIOS" "$OUTDIR/ush.elf" "$OUTDIR/ush.aout" "ush"
+
+ush_sz=$(stat -c %s "$OUTDIR/ush.aout")
+echo "  aout_size=$ush_sz"
+
+cat "$OUTDIR/ush.aout" >> "$OUTDIR/programs.bin"
+offset=$(( offset + ush_sz ))
 
 build_program "guess"
 

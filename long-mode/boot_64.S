@@ -151,10 +151,13 @@ start64:
 .section .data
 .align 4096
 # page table structure
+.global pml4
 pml4:
     .skip 4096
+.global pdp
 pdp:
     .skip 4096
+.global pd
 pd:
     .skip 4096
 
