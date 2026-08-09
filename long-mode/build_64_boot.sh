@@ -52,6 +52,8 @@ gcc $CFLAGS -o "$OUTDIR/interrupts.o" kernel/interrupts.c
 gcc $CFLAGS -o "$OUTDIR/exec.o"       kernel/exec.c
 gcc $CFLAGS -o "$OUTDIR/lib.o"        kernel/lib.c
 gcc $CFLAGS -o "$OUTDIR/ata.o"        drivers/ata.c
+gcc $CFLAGS -o "$OUTDIR/e1000.o"      drivers/e1000.c
+gcc $CFLAGS -o "$OUTDIR/pci.o"        arch/pci.c
 gcc $CFLAGS -o "$OUTDIR/timer.o"      drivers/timer.c
 gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
 gcc $CFLAGS -o "$OUTDIR/syscall.o"   kernel/syscall.c
@@ -66,7 +68,8 @@ KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/user.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
-    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o $OUTDIR/process.o $OUTDIR/paging.o"
+    $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o $OUTDIR/process.o $OUTDIR/paging.o \
+    $OUTDIR/e1000.o $OUTDIR/pci.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"
@@ -155,6 +158,7 @@ build_program "primes"
 build_program "fib"
 build_program "chars"
 build_program "calc"
+build_program "net"
 
 # ============================================================
 # 6. Build ring-3 user program via elf2minios -> ring3.aout

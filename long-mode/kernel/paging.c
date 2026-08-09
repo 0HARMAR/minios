@@ -1,7 +1,12 @@
 #include "paging.h"
 
-/* boot page tables — exported from boot_64.S, identity-mapped */
+/* boot page tables — exported from boot_64.S, identity-mapped.
+ * pd maps 0..1GB; pd2/pd3/pd4 map 0x40000000..0xFFFFFFFF (supervisor),
+ * so PCI MMIO (e1000 BAR0 @ 0xF0000000) is reachable from any context. */
 extern uint64_t pd[];
+extern uint64_t pd2[];
+extern uint64_t pd3[];
+extern uint64_t pd4[];
 
 /* page table pool: 16 processes × 3 tables (PML4+PDP+PD) × 4096 bytes */
 static uint8_t __attribute__((aligned(4096))) pt_pool[16][3][4096];
@@ -42,6 +47,12 @@ uint64_t pt_create(uint64_t slot_base, uint32_t user_pages)
 
     /* PDP[0] → new PD (with PAGE_USER for same reason) */
     new_pdp[0] = phys((uint64_t)new_pd) | PAGE_PRESENT | PAGE_WRITE | PAGE_USER;
+
+    /* PDP[1..3] → shared boot pd2/pd3/pd4 (0x40000000-0xFFFFFFFF).
+     * supervisor-only so ring3 cannot touch PCI MMIO. */
+    new_pdp[1] = phys((uint64_t)pd2) | PAGE_PRESENT | PAGE_WRITE;
+    new_pdp[2] = phys((uint64_t)pd3) | PAGE_PRESENT | PAGE_WRITE;
+    new_pdp[3] = phys((uint64_t)pd4) | PAGE_PRESENT | PAGE_WRITE;
 
     /* PD[0] — copy kernel mapping from boot PD (supervisor-only, no PAGE_USER) */
     new_pd[0] = pd[0];

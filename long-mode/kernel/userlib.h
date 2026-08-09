@@ -39,6 +39,42 @@ static inline int64_t crtproc(const char *path, uint64_t flags) {
     return ret;
 }
 
+static inline int64_t netsend(const void *buf, uint64_t len) {
+    int64_t ret;
+    asm volatile(
+        "movq $5, %%rax\n"
+        "int  $0x80\n"
+        : "=a"(ret)
+        : "D"((uint64_t)buf), "S"(len)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
+static inline int64_t netrecv(void *buf, uint64_t len) {
+    int64_t ret;
+    asm volatile(
+        "movq $6, %%rax\n"
+        "int  $0x80\n"
+        : "=a"(ret)
+        : "D"((uint64_t)buf), "S"(len)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
+static inline int64_t netmac(void *buf, uint64_t len) {
+    int64_t ret;
+    asm volatile(
+        "movq $7, %%rax\n"
+        "int  $0x80\n"
+        : "=a"(ret)
+        : "D"((uint64_t)buf), "S"(len)
+        : "rcx", "r11", "memory"
+    );
+    return ret;
+}
+
 __attribute__((noreturn))
 static inline void exit(int64_t status) {
     asm volatile(

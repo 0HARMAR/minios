@@ -10,6 +10,7 @@
 #include "timer.h"
 #include "syscall.h"
 #include "process.h"
+#include "e1000.h"
 
 /* user-mode entry (arch/user.S) */
 extern uint64_t gdt64[];
@@ -56,6 +57,7 @@ void kernel_main() {
     interrupts_init();
     keyboard_init();
     timer_init();
+    e1000_init();
     fs_init();
     tss_init();
     process_init();
@@ -77,6 +79,7 @@ void kernel_main() {
         print_string(vga_buffer, num, &vga_cursor_pos);
         print_newline(vga_buffer, &vga_cursor_pos);
     }
+
     update_cursor(vga_cursor_pos);
 
     /* idle loop — yield to user processes, halt when nothing to do */

@@ -9,6 +9,9 @@
 #define SYS_INPUT    2
 #define SYS_CRTPROC  3
 #define SYS_EXIT     4
+#define SYS_NETSEND  5
+#define SYS_NETRECV  6
+#define SYS_NETMAC   7
 
 /* device descriptors */
 #define DD_STDOUT    0

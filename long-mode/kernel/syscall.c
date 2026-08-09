@@ -6,6 +6,7 @@
 #include "paging.h"
 #include "lib.h"
 #include "io.h"
+#include "e1000.h"
 
 #define MAX_DEVICES     8
 
@@ -141,6 +142,34 @@ static int64_t sys_crtproc(const char *path, uint64_t flags) {
     return proc_spawn(path);
 }
 
+static int64_t sys_netsend(const void *buf, uint64_t len) {
+    if (len > 1518)
+        return -EINVAL;
+    if (validate_user_buffer(buf, len) != 0)
+        return -EFAULT;
+    if (e1000_send((const uint8_t *)buf, (uint16_t)len) != 0)
+        return -1;
+    return (int64_t)len;
+}
+
+static int64_t sys_netrecv(void *buf, uint64_t len) {
+    if (validate_user_buffer(buf, len) != 0)
+        return -EFAULT;
+    return (int64_t)e1000_recv((uint8_t *)buf, (uint16_t)(len > 65535 ? 65535 : len));
+}
+
+static int64_t sys_netmac(void *buf, uint64_t len) {
+    if (len < 6)
+        return -EINVAL;
+    if (validate_user_buffer(buf, 6) != 0)
+        return -EFAULT;
+    uint8_t *dst = (uint8_t *)buf;
+    uint8_t *mac = e1000_get_mac();
+    for (int i = 0; i < 6; i++)
+        dst[i] = mac[i];
+    return 6;
+}
+
 void proc_exit_current(int64_t status) {
     if (current == 0 || current->pid == 0)
         return;
@@ -175,6 +204,21 @@ void syscall_handler(struct registers *regs) {
     case SYS_CRTPROC:
         regs->rax = sys_crtproc(
             (const char *)regs->rdi,
+            regs->rsi);
+        break;
+    case SYS_NETSEND:
+        regs->rax = sys_netsend(
+            (const void *)regs->rdi,
+            regs->rsi);
+        break;
+    case SYS_NETRECV:
+        regs->rax = sys_netrecv(
+            (void *)regs->rdi,
+            regs->rsi);
+        break;
+    case SYS_NETMAC:
+        regs->rax = sys_netmac(
+            (void *)regs->rdi,
             regs->rsi);
         break;
     case SYS_EXIT:

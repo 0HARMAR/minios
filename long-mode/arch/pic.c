@@ -23,7 +23,8 @@ void pic_init(void) {
     outb(PIC1_DATA, ICW4_8086);
     outb(PIC2_DATA, ICW4_8086);
 
-    outb(PIC1_DATA, 0xFC);
+    /* IRQ0, IRQ1 enabled; IRQ2 unmasked (cascade to slave PIC!) */
+    outb(PIC1_DATA, 0xF8);
     outb(PIC2_DATA, 0xFF);
 }
 

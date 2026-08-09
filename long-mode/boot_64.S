@@ -61,6 +61,32 @@ boot_64:
     addl $8, %edi   # per entry 8 bytes
     loop 1b
 
+    # map 0x40000000 - 0xFFFFFFFF (up to 4GB) so the PCI MMIO hole
+    # (e1000 BAR0 @ 0xF0000000) is reachable.
+    # supervisor-only: no PAGE_USER at any level.
+    # PDP[1] -> pd2, PDP[2] -> pd3, PDP[3] -> pd4
+    movl $pdp, %edi
+    movl $pd2, %eax
+    orl $(PAGE_PRESENT | PAGE_WRITE), %eax
+    movl %eax, 8(%edi)
+    movl $pd3, %eax
+    orl $(PAGE_PRESENT | PAGE_WRITE), %eax
+    movl %eax, 16(%edi)
+    movl $pd4, %eax
+    orl $(PAGE_PRESENT | PAGE_WRITE), %eax
+    movl %eax, 24(%edi)
+
+    # fill pd2/pd3/pd4 with 2MB huge pages: 1536 entries, 0x40000000..
+    movl $pd2, %edi
+    movl $0x40000000, %eax
+    movl $1536, %ecx
+2:
+    movl %eax, (%edi)
+    orl $(PAGE_PRESENT | PAGE_WRITE | PAGE_HUGE), (%edi)
+    addl $0x200000, %eax
+    addl $8, %edi
+    loop 2b
+
     # third, use PAE
     movl %cr4, %eax
     orl $(1 << 5), %eax     # CR4.PAE = 1
@@ -159,6 +185,15 @@ pdp:
     .skip 4096
 .global pd
 pd:
+    .skip 4096
+.global pd2
+pd2:
+    .skip 4096
+.global pd3
+pd3:
+    .skip 4096
+.global pd4
+pd4:
     .skip 4096
 
 # 64 bit GDT

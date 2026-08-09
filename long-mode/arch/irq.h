@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+/*registers结构体通过push寄存器到栈上【手动】构建，
+所以顺序绝对不能改！
+*/
 struct registers {
     uint64_t r15, r14, r13, r12, r11, r10;
     uint64_t r9, r8, rdi, rsi, rbp, rbx, rdx, rcx, rax;
