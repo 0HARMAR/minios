@@ -2,6 +2,7 @@
 #include "io.h"
 #include "irq.h"
 #include "pic.h"
+#include "process.h"
 
 #define KEYBOARD_DATA_PORT 0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -10,6 +11,9 @@ static char key_buffer[256];
 static int buffer_head = 0;
 static int buffer_tail = 0;
 static int shift_pressed = 0;
+
+/* pid of the current keyboard owner; 0 = free (anyone may take it) */
+static int kbd_owner = 0;
 
 static const char scan_to_ascii[128] = {
     0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
@@ -75,7 +79,27 @@ int keyboard_available(void) {
     return buffer_head != buffer_tail;
 }
 
+/* lazy ownership: the first process that actually reads the keyboard
+ * becomes its owner; while owned by another process, reads are refused
+ * instead of stealing characters.  kbd_owner == 0 means the terminal
+ * is free. */
+int keyboard_acquire(int pid) {
+    if (kbd_owner == 0 || kbd_owner == pid) {
+        kbd_owner = pid;
+        return 1;
+    }
+    return 0;
+}
+
+void keyboard_release(int pid) {
+    if (kbd_owner == pid)
+        kbd_owner = 0;
+}
+
 char keyboard_read(void) {
+    /* refuse (return NUL) if the keyboard belongs to another process */
+    if (!keyboard_acquire(current->pid))
+        return 0;
     while (!keyboard_available());
     char c = key_buffer[buffer_tail];
     buffer_tail = (buffer_tail + 1) % 256;

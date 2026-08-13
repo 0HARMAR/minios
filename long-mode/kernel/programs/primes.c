@@ -1,13 +1,17 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void print_char(unsigned char *buf, char c, uint32_t *cursor, uint8_t attr);
-void update_cursor(uint32_t position);
-
-extern uint32_t vga_cursor_pos;
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
 static void itoa(int n, char *buf) {
     int i = 0;
@@ -25,12 +29,8 @@ static void itoa(int n, char *buf) {
 }
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = vga_cursor_pos;
-
-    print_string(vga, "primes -- prime numbers up to 500", &cursor);
-    print_newline(vga, &cursor);
-    print_newline(vga, &cursor);
+    print("primes -- prime numbers up to 500\n");
+    print("\n");
 
     int count = 0;
     char buf[16];
@@ -42,24 +42,19 @@ void _start(void) {
         }
         if (is_prime) {
             itoa(n, buf);
-            print_string(vga, buf, &cursor);
+            print(buf);
             count++;
             if (count % 10 == 0) {
-                print_newline(vga, &cursor);
+                print("\n");
             } else {
-                print_string(vga, "  ", &cursor);
+                print("  ");
             }
         }
     }
 
-    print_newline(vga, &cursor);
-    print_newline(vga, &cursor);
-    print_string(vga, "found ", &cursor);
+    print("\n\nfound ");
     itoa(count, buf);
-    print_string(vga, buf, &cursor);
-    print_string(vga, " primes", &cursor);
-    print_newline(vga, &cursor);
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    print(buf);
+    print(" primes\n");
+    exit(0);
 }

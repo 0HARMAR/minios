@@ -1,14 +1,24 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void print_char(unsigned char *buf, char c, uint32_t *cursor, uint8_t attr);
-void update_cursor(uint32_t position);
-char keyboard_read(void);
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
-extern uint32_t vga_cursor_pos;
+static char putc_buf;
+static void putc(char c)
+{
+    putc_buf = c;
+    output(0, &putc_buf, 1);
+}
 
 static uint32_t rng_state;
 
@@ -42,14 +52,9 @@ static int atoi_simple(const char *s) {
 }
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = vga_cursor_pos;
+    rng_state = 0x1234;
 
-    rng_state = vga_cursor_pos; /* seed from cursor position */
-
-    print_string(vga, "guess -- number guessing game (1-100)", &cursor);
-    print_newline(vga, &cursor);
-    print_newline(vga, &cursor);
+    print("guess -- number guessing game (1-100)\n\n");
 
     int secret = rand_mod(100) + 1;
     int attempts = 0;
@@ -58,28 +63,26 @@ void _start(void) {
     while (1) {
         attempts++;
         itoa(attempts, buf);
-        print_string(vga, "[#", &cursor);
-        print_string(vga, buf, &cursor);
-        print_string(vga, "] your guess> ", &cursor);
-        vga_cursor_pos = cursor;
-        update_cursor(cursor);
+        print("[#");
+        print(buf);
+        print("] your guess> ");
 
         char line[16];
         int i = 0;
         while (1) {
-            char c = keyboard_read();
+            char c;
+            if (input(1, &c, 1) < 0)
+                continue;   /* keyboard owned by another process */
             if (c == '\n') {
-                print_newline(vga, &cursor);
+                print("\n");
                 break;
             } else if (c == '\b') {
                 if (i > 0) {
-                    cursor -= 2;
-                    print_char(vga, ' ', &cursor, 0x0B);
-                    cursor -= 2;
+                    print("\b \b");
                     i--;
                 }
             } else if (c >= '0' && c <= '9' && i < 15) {
-                print_char(vga, c, &cursor, 0x0F);
+                putc(c);
                 line[i++] = c;
             }
         }
@@ -88,19 +91,16 @@ void _start(void) {
 
         if (guess == secret) {
             itoa(attempts, buf);
-            print_string(vga, "correct! you got it in ", &cursor);
-            print_string(vga, buf, &cursor);
-            print_string(vga, " attempts.", &cursor);
-            print_newline(vga, &cursor);
+            print("correct! you got it in ");
+            print(buf);
+            print(" attempts.\n");
             break;
         } else if (guess < secret) {
-            print_string(vga, "  too low, try higher", &cursor);
+            print("  too low, try higher");
         } else {
-            print_string(vga, "  too high, try lower", &cursor);
+            print("  too high, try lower");
         }
-        print_newline(vga, &cursor);
+        print("\n");
     }
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    exit(0);
 }

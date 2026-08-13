@@ -24,6 +24,7 @@
 #define ENOENT   3
 #define ENOMEM   4
 #define EINVAL   5
+#define EBUSY    6
 
 /* serial port write (COM1) — shared for debug tracing */
 int64_t serial_write(const void *buf, uint64_t len);

@@ -1,12 +1,17 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void update_cursor(uint32_t position);
-
-extern uint32_t vga_cursor_pos;
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
 static void itoa(int n, char *buf) {
     int i = 0;
@@ -24,31 +29,25 @@ static void itoa(int n, char *buf) {
 }
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = vga_cursor_pos;
-
-    print_string(vga, "fib -- first 30 Fibonacci numbers", &cursor);
-    print_newline(vga, &cursor);
-    print_newline(vga, &cursor);
+    print("fib -- first 30 Fibonacci numbers\n");
+    print("\n");
 
     int a = 0, b = 1;
     char buf[16];
 
     for (int i = 0; i < 30; i++) {
+        print("F(");
         itoa(i, buf);
-        print_string(vga, "F(", &cursor);
-        print_string(vga, buf, &cursor);
-        print_string(vga, ") = ", &cursor);
+        print(buf);
+        print(") = ");
 
         itoa(a, buf);
-        print_string(vga, buf, &cursor);
-        print_newline(vga, &cursor);
+        print(buf);
+        print("\n");
 
         int next = a + b;
         a = b;
         b = next;
     }
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    exit(0);
 }

@@ -1,14 +1,24 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void print_char(unsigned char *buf, char c, uint32_t *cursor, uint8_t attr);
-void update_cursor(uint32_t position);
-char keyboard_read(void);
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
-extern uint32_t vga_cursor_pos;
+static char putc_buf;
+static void putc(char c)
+{
+    putc_buf = c;
+    output(0, &putc_buf, 1);
+}
 
 static void itoa(int n, char *buf) {
     int i = 0;
@@ -29,24 +39,24 @@ static void itoa(int n, char *buf) {
     buf[i] = '\0';
 }
 
-static int read_num(unsigned char *vga, uint32_t *cursor) {
+static int read_num(void) {
     char buf[16];
     int i = 0;
     while (1) {
-        char c = keyboard_read();
+        char c;
+        if (input(1, &c, 1) < 0)
+            continue;   /* keyboard owned by another process */
         if (c == '\n') {
-            print_newline(vga, cursor);
+            print("\n");
             break;
         } else if (c == '\b') {
             if (i > 0) {
-                *cursor -= 2;
-                print_char(vga, ' ', cursor, 0x0B);
-                *cursor -= 2;
+                print("\b \b");
                 i--;
             }
         } else if ((c >= '0' && c <= '9') || (i == 0 && c == '-')) {
             if (i < 15) {
-                print_char(vga, c, cursor, 0x0F);
+                putc(c);
                 buf[i++] = c;
             }
         }
@@ -59,11 +69,13 @@ static int read_num(unsigned char *vga, uint32_t *cursor) {
     return n * sign;
 }
 
-static char read_op(unsigned char *vga, uint32_t *cursor) {
+static char read_op(void) {
     while (1) {
-        char c = keyboard_read();
+        char c;
+        if (input(1, &c, 1) < 0)
+            continue;   /* keyboard owned by another process */
         if (c == '+' || c == '-' || c == '*' || c == '/') {
-            print_char(vga, c, cursor, 0x0F);
+            putc(c);
             return c;
         }
         if (c == 'q') return 'q';
@@ -71,30 +83,20 @@ static char read_op(unsigned char *vga, uint32_t *cursor) {
 }
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = vga_cursor_pos;
-
-    print_string(vga, "calc -- 4-function calculator (q to quit)", &cursor);
-    print_newline(vga, &cursor);
+    print("calc -- 4-function calculator (q to quit)\n");
 
     while (1) {
-        print_newline(vga, &cursor);
-        print_string(vga, "num1> ", &cursor);
-        vga_cursor_pos = cursor;
-        update_cursor(cursor);
-        int a = read_num(vga, &cursor);
+        print("\n");
+        print("num1> ");
+        int a = read_num();
 
-        print_string(vga, "  op> ", &cursor);
-        vga_cursor_pos = cursor;
-        update_cursor(cursor);
-        char op = read_op(vga, &cursor);
+        print("  op> ");
+        char op = read_op();
         if (op == 'q') break;
-        print_newline(vga, &cursor);
+        print("\n");
 
-        print_string(vga, "num2> ", &cursor);
-        vga_cursor_pos = cursor;
-        update_cursor(cursor);
-        int b = read_num(vga, &cursor);
+        print("num2> ");
+        int b = read_num();
 
         int result;
         char buf[16];
@@ -106,28 +108,20 @@ void _start(void) {
             default:  result = 0; break;
         }
 
+        print("  ");
         itoa(a, buf);
-        print_string(vga, "  ", &cursor);
-        print_string(vga, buf, &cursor);
-
-        char op_str[2] = {op, '\0'};
-        op_str[0] = op;
-        print_string(vga, " ", &cursor);
-        print_string(vga, op_str, &cursor);
-        print_string(vga, " ", &cursor);
-
+        print(buf);
+        print(" ");
+        putc(op);
+        print(" ");
         itoa(b, buf);
-        print_string(vga, buf, &cursor);
-        print_string(vga, " = ", &cursor);
-
+        print(buf);
+        print(" = ");
         itoa(result, buf);
-        print_string(vga, buf, &cursor);
-        print_newline(vga, &cursor);
+        print(buf);
+        print("\n");
     }
 
-    print_string(vga, "bye!", &cursor);
-    print_newline(vga, &cursor);
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    print("bye!\n");
+    exit(0);
 }

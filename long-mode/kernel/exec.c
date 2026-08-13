@@ -46,18 +46,16 @@ void exec_init(void) {
     for (uint8_t *p = _kernel_load_end; p < _kernel_end; p++)
         *p = 0;
 
-    /* Phase 3: zero programs' BSS and build name->entry table */
+    /* Phase 3: build name->entry table.  BSS is NOT zeroed here — it
+     * would clobber the next program's header (BSS has no file space,
+     * so it overlaps the next a.out on disk).  proc_spawn zeroes BSS
+     * in the per-process slot instead. */
     prog_count = 0;
     uint8_t *prog = (uint8_t *)PROGRAMS_BASE;
     for (uint32_t off = 0; off < moved; ) {
         hdr = (minios_exec_t *)(prog + off);
         if (hdr->a_magic != AOUT_MAGIC || prog_count >= MAX_PROGS)
             break;
-
-        /* zero-fill BSS after text+data */
-        uint8_t *bss_start = prog + off + A_HDRSIZE + hdr->a_text + hdr->a_data;
-        for (uint32_t i = 0; i < hdr->a_bss; i++)
-            bss_start[i] = 0;
 
         /* record name -> entry */
         for (int i = 0; i < AOUT_NAME_MAX; i++)

@@ -130,6 +130,8 @@ static int64_t sys_input(uint8_t dd, void *buf, uint64_t len) {
         return -EBADF;
     if (validate_user_buffer(buf, len) != 0)
         return -EFAULT;
+    if (dd == DD_KEYBOARD && !keyboard_acquire(current->pid))
+        return -EBUSY;
     return read_table[dd](buf, len);
 }
 
@@ -139,7 +141,10 @@ static int64_t sys_crtproc(const char *path, uint64_t flags) {
     if (validate_user_buffer(path, 128) != 0)
         return -EFAULT;
 
-    return proc_spawn(path);
+    int64_t pid = proc_spawn(path);
+    if (pid >= 0)
+        keyboard_release(current->pid); /*调用者让出键盘*/
+    return pid;
 }
 
 static int64_t sys_netsend(const void *buf, uint64_t len) {
@@ -176,6 +181,9 @@ void proc_exit_current(int64_t status) {
 
     current->state       = PROC_ZOMBIE;
     current->exit_status = status;
+
+    /* give the keyboard back to the shell (pid 0) */
+    keyboard_release(current->pid);
 
     /* free resources */
     pt_destroy(current->cr3);

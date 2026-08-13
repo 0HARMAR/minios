@@ -132,14 +132,6 @@ build_program() {
     local ld_script="$PROG_DIR/program.ld"
     ld -m elf_x86_64 -T "$ld_script" \
         --defsym=BASE=$(printf '0x%X' $text_addr) \
-        --defsym=print_string=$P_STR \
-        --defsym=print_newline=$P_NL \
-        --defsym=print_char=$P_CH \
-        --defsym=clear_screen=$P_CLR \
-        --defsym=update_cursor=$P_UC \
-        --defsym=vga_cursor_pos=$P_VGA \
-        --defsym=keyboard_read=$P_KR \
-        --defsym=keyboard_available=$P_KA \
         "$obj" -o "$elf"
 
     "$ELF2MINIOS" "$elf" "$aout" "$name"

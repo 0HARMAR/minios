@@ -75,7 +75,9 @@ void _start(void)
 
         for (;;) {
             char c;
-            input(1, &c, 1);
+            if (input(1, &c, 1) < 0) {
+                continue;
+            }
 
             if (c == '\n') {
                 putc('\n');

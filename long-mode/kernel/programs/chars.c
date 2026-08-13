@@ -1,54 +1,55 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void print_char(unsigned char *buf, char c, uint32_t *cursor, uint8_t attr);
-void clear_screen(unsigned char *buf);
-void update_cursor(uint32_t position);
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
-extern uint32_t vga_cursor_pos;
+static char putc_buf;
+static void putc(char c)
+{
+    putc_buf = c;
+    output(0, &putc_buf, 1);
+}
 
-static void print_hex2(uint8_t n, unsigned char *vga, uint32_t *cursor) {
-    char hex[] = "0123456789ABCDEF";
-    print_char(vga, hex[n >> 4], cursor, 0x0B);
-    print_char(vga, hex[n & 0xF], cursor, 0x0B);
+static void print_hex2(uint8_t n) {
+    static const char hex[] = "0123456789ABCDEF";
+    putc(hex[n >> 4]);
+    putc(hex[n & 0xF]);
 }
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = 0;
+    print("ASCII Character Set (0x20 - 0x7E)\n\n");
 
-    clear_screen(vga);
-
-    print_string(vga, "ASCII Character Set (0x20 - 0x7E)", &cursor);
-    print_newline(vga, &cursor);
-    print_newline(vga, &cursor);
-
-    print_string(vga, "    ", &cursor);
+    print("    ");
     for (int col = 0; col < 16; col++) {
-        print_string(vga, " +", &cursor);
-        print_hex2(col, vga, &cursor);
+        print(" +");
+        print_hex2((uint8_t)col);
     }
-    print_newline(vga, &cursor);
+    print("\n");
 
     for (int row = 0; row < 6; row++) {
-        print_string(vga, " ", &cursor);
-        print_hex2((uint8_t)((row + 2) * 16), vga, &cursor);
-        print_string(vga, " ", &cursor);
+        print(" ");
+        print_hex2((uint8_t)((row + 2) * 16));
+        print(" ");
 
         for (int col = 1; col < 16; col++) {
             uint8_t code = (uint8_t)((row + 2) * 16 + col);
             if (code > 0x7E) break;
-            print_string(vga, "  ", &cursor);
-            print_char(vga, (char)code, &cursor, 0x0F);
+            print("  ");
+            putc((char)code);
         }
-        print_newline(vga, &cursor);
+        print("\n");
     }
 
-    print_newline(vga, &cursor);
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    print("\n");
+    exit(0);
 }

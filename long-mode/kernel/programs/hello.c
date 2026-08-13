@@ -1,22 +1,20 @@
 #include <stdint.h>
+#include "../userlib.h"
 
-#define VGA_BUFFER 0xB8000
+static uint64_t slen(const char *s)
+{
+    uint64_t n = 0;
+    while (s[n]) n++;
+    return n;
+}
 
-void print_string(unsigned char *buf, const char *str, uint32_t *cursor);
-void print_newline(unsigned char *buf, uint32_t *cursor);
-void update_cursor(uint32_t position);
-
-extern uint32_t vga_cursor_pos;
+static void print(const char *s)
+{
+    output(0, s, slen(s));
+}
 
 void _start(void) {
-    unsigned char *vga = (unsigned char *)VGA_BUFFER;
-    uint32_t cursor = vga_cursor_pos;
-
-    print_string(vga, "Hello from program!", &cursor);
-    print_newline(vga, &cursor);
-    print_string(vga, "  -> ran via MINI exec format", &cursor);
-    print_newline(vga, &cursor);
-
-    vga_cursor_pos = cursor;
-    update_cursor(cursor);
+    print("Hello from program!\n");
+    print("  -> ran via MINI exec format\n");
+    exit(0);
 }
