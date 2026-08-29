@@ -178,9 +178,6 @@ void proc_exit_current(int64_t status) {
     current->state       = PROC_ZOMBIE;
     current->exit_status = status;
 
-    /* give the keyboard back to the shell (pid 0) */
-    keyboard_release(current->pid);
-
     /* free resources */
     pt_destroy(current->cr3);
     kstack_free(current->pid);
