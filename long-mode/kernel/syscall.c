@@ -140,6 +140,15 @@ static int64_t sys_crtproc(const char *path, uint64_t flags) {
         return -EFAULT;
 
     int64_t pid = proc_spawn(path);
+    if (pid < 0)
+        return pid;
+
+    asm volatile("sti"); // 等待期间允许抢占
+    while (proc_table[pid].state != PROC_ZOMBIE)
+        schedule(); // 让出CPU给子进程
+
+    proc_table[pid].state = PROC_FREE;
+    proc_table[pid].pid = -1;
     return pid;
 }
 
@@ -175,13 +184,14 @@ void proc_exit_current(int64_t status) {
     if (current == 0 || current->pid == 0)
         return;
 
-    current->state       = PROC_ZOMBIE;
     current->exit_status = status;
 
     /* free resources */
     pt_destroy(current->cr3);
     kstack_free(current->pid);
 
+    current->state = PROC_ZOMBIE;
+    
     schedule();
     asm ("sti");
     for(;;);
