@@ -11,6 +11,7 @@
 #include "syscall.h"
 #include "process.h"
 #include "e1000.h"
+#include "ip.h"
 
 /* user-mode entry (arch/user.S) */
 extern uint64_t gdt64[];
@@ -58,6 +59,7 @@ void kernel_main() {
     keyboard_init();
     timer_init();
     e1000_init();
+    ip_init();
     fs_init();
     tss_init();
     process_init();
@@ -67,6 +69,15 @@ void kernel_main() {
     else
         print_string(vga_buffer, "[fs not ready - type mkfs]", &vga_cursor_pos);
 
+    update_cursor(vga_cursor_pos);
+
+#if IP_TEST_MODE
+    /* 接收侧调试模式：不启动 ush。先发一个 ICMP echo 制造流量，
+     * 然后死循环收包，由 ip_handle_dbg 把合法 IP 包打到 COM1。 */
+    ip_test_send_echo();
+    for (;;)
+        ip_poll();
+#else
     /* spawn ush as the primary user shell (init/systemd equivalent) */
     int64_t pid = proc_spawn("ush");
     if (pid < 0) {
@@ -80,8 +91,6 @@ void kernel_main() {
         print_newline(vga_buffer, &vga_cursor_pos);
     }
 
-    update_cursor(vga_cursor_pos);
-
     /* idle loop — yield to user processes, halt when nothing to do */
     while (1) {
         if (proc_has_runnable()) {
@@ -90,4 +99,5 @@ void kernel_main() {
             asm("sti; hlt");
         }
     }
+#endif
 }

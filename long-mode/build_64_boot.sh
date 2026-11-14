@@ -39,7 +39,7 @@ as --64 arch/user.S -o "$OUTDIR/user.o"
 # 2. Compile kernel C files
 # ============================================================
 CFLAGS="-c -m64 -ffreestanding -fno-pie -mcmodel=small -mno-red-zone"
-CFLAGS="$CFLAGS -I$BASE_DIR/arch -I$BASE_DIR/drivers -I$BASE_DIR/io -I$BASE_DIR/kernel"
+CFLAGS="$CFLAGS -I$BASE_DIR/arch -I$BASE_DIR/drivers -I$BASE_DIR/io -I$BASE_DIR/kernel -I$BASE_DIR/net"
 
 gcc $CFLAGS -o "$OUTDIR/kernel.o"     kernel/kernel.c
 gcc $CFLAGS -o "$OUTDIR/io.o"         io/io.c
@@ -53,6 +53,8 @@ gcc $CFLAGS -o "$OUTDIR/exec.o"       kernel/exec.c
 gcc $CFLAGS -o "$OUTDIR/lib.o"        kernel/lib.c
 gcc $CFLAGS -o "$OUTDIR/ata.o"        drivers/ata.c
 gcc $CFLAGS -o "$OUTDIR/e1000.o"      drivers/e1000.c
+gcc $CFLAGS -o "$OUTDIR/ip.o"         net/ip.c
+gcc $CFLAGS -o "$OUTDIR/arp.o"        net/arp.c
 gcc $CFLAGS -o "$OUTDIR/pci.o"        arch/pci.c
 gcc $CFLAGS -o "$OUTDIR/timer.o"      drivers/timer.c
 gcc $CFLAGS -o "$OUTDIR/fs.o"         kernel/fs.c
@@ -69,7 +71,7 @@ KERNEL_OBJS="$OUTDIR/boot_32_new.o $OUTDIR/boot_64_new.o \
     $OUTDIR/pic.o $OUTDIR/idt.o $OUTDIR/irq.o $OUTDIR/keyboard.o \
     $OUTDIR/interrupts.o $OUTDIR/exec.o $OUTDIR/lib.o $OUTDIR/ata.o \
     $OUTDIR/timer.o $OUTDIR/fs.o $OUTDIR/syscall.o $OUTDIR/process.o $OUTDIR/paging.o \
-    $OUTDIR/e1000.o $OUTDIR/pci.o"
+    $OUTDIR/e1000.o $OUTDIR/ip.o $OUTDIR/arp.o $OUTDIR/pci.o"
 
 ld -m elf_x86_64 -T kernel/link.ld $KERNEL_OBJS -o "$OUTDIR/stage2.elf"
 objcopy -O binary "$OUTDIR/stage2.elf" "$OUTDIR/kernel.bin"
@@ -224,5 +226,10 @@ echo "Programs:  $(stat -c %s "$OUTDIR/programs.bin") bytes"
 echo "Payload:   $total_bytes bytes contiguously @ sector 1"
 echo "Filesystem starts @ sector $((2048)) (run 'mkfs' in shell)"
 echo ""
-echo "Run: qemu-system-x86_64 -hda $OUTDIR/disk.img"
+echo "Minimal Run: qemu-system-x86_64 -hda $OUTDIR/disk.img"
+echo "Complete Run: qemu-system-x86_64 -drive format=raw,file=$OUTDIR/disk.img \\"
+echo "              -netdev user,id=net0 \\"
+echo "              -device e1000,netdev=net0 \\"
+echo "              -object filter-dump,id=f1,netdev=net0,file=/tmp/net.pcap \\"
+echo "              -m 1G"
 echo "============================================"
