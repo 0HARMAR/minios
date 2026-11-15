@@ -12,6 +12,7 @@
 #include "process.h"
 #include "e1000.h"
 #include "ip.h"
+#include "tcp.h"
 
 /* user-mode entry (arch/user.S) */
 extern uint64_t gdt64[];
@@ -72,7 +73,10 @@ void kernel_main() {
     update_cursor(vga_cursor_pos);
 
 #if IP_TEST_MODE
-    /* 接收侧调试模式：不启动 ush，死循环收包并回应 ICMP echo request。 */
+    /* 接收侧调试模式：不启动 ush，死循环收包；
+     * ICMP 回应 echo request，TCP 在 1234 上只做三次握手。 */
+    if (tcp_listen(1234) == 0)
+        serial_write("[tcp] listen 1234\n", sizeof("[tcp] listen 1234\n") - 1);
     serial_write("[icmp] ready\n", sizeof("[icmp] ready\n") - 1);
     for (;;)
         ip_poll();

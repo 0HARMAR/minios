@@ -5,6 +5,7 @@
 #include "arp.h"
 #include "e1000.h"
 #include "icmp.h"
+#include "tcp.h"
 
 extern uint32_t vga_cursor_pos;
 static const uint8_t ip_csum_test[20] = {
@@ -178,6 +179,8 @@ static void ip_handle(uint8_t *frame, uint16_t n)
 
     if (h->proto == IP_PROTO_ICMP)
         icmp_input((uint8_t *)h, ihl, total);
+    else if (h->proto == IP_PROTO_TCP)
+        tcp_input((uint8_t *)h, ihl, total);
 }
 
 void ip_poll(void)
