@@ -72,9 +72,8 @@ void kernel_main() {
     update_cursor(vga_cursor_pos);
 
 #if IP_TEST_MODE
-    /* 接收侧调试模式：不启动 ush。先发一个 ICMP echo 制造流量，
-     * 然后死循环收包，由 ip_handle_dbg 把合法 IP 包打到 COM1。 */
-    ip_test_send_echo();
+    /* 接收侧调试模式：不启动 ush，死循环收包并回应 ICMP echo request。 */
+    serial_write("[icmp] ready\n", sizeof("[icmp] ready\n") - 1);
     for (;;)
         ip_poll();
 #else

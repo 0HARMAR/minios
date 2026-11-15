@@ -4,7 +4,7 @@
 #include "vga.h"
 #include "arp.h"
 #include "e1000.h"
-#include "syscall.h"   /* serial_write (COM1)，仅接收侧调试用 */
+#include "icmp.h"
 
 extern uint32_t vga_cursor_pos;
 static const uint8_t ip_csum_test[20] = {
@@ -130,40 +130,35 @@ int32_t ip_send(uint8_t proto, uint32_t dst, const void* payload, uint16_t len)
     return (e1000_send(frame, flen) == 0) ? 0 : -1;
 }
 
-#if IP_TEST_MODE
-/* ── 接收侧调试：串口打印 + 启动时发一个 ICMP echo ─────────── */
-
-static void dbg_str(const char *s)
+/* 同网段源地址顺手学习 MAC，避免回 ICMP 时 ARP 未命中。 */
+static void ip_learn_src(const uint8_t *frame, uint32_t src)
 {
-    uint32_t n = 0;
-    while (s[n])
-        n++;
-    serial_write(s, n);
+    if (src == 0 || src == IP_ADDR || src == IP_BCAST)
+        return;
+    if ((src & 0xF0000000u) == 0xE0000000u)     /* 组播源 */
+        return;
+    if ((src & IP_MASK) != (IP_ADDR & IP_MASK)) /* 非同网段：源 MAC 是网关的 */
+        return;
+    if (frame[6] & 0x01)                        /* 组播/广播 MAC */
+        return;
+
+    int zero = 1;
+    for (int i = 0; i < 6; i++)
+        if (frame[6 + i])
+            zero = 0;
+    if (zero)
+        return;
+
+    arp_update(src, frame + 6);
 }
 
-static void dbg_dec(uint32_t v)
-{
-    char b[12];
-    utoa(v, b);
-    dbg_str(b);
-}
-
-static void dbg_ip(uint32_t ip)
-{
-    for (int i = 3; i >= 0; i--) {
-        dbg_dec((ip >> (i * 8)) & 0xFF);
-        if (i)
-            dbg_str(".");
-    }
-}
-
-/* 只做校验和打印，不做任何协议处理。 */
-static void ip_handle_dbg(const uint8_t *frame, uint16_t n)
+/* 生产版 IP 入口：校验 + 分片丢弃 + 按协议分发。 */
+static void ip_handle(uint8_t *frame, uint16_t n)
 {
     if (n < 14 + 20)
         return;
 
-    const struct ip_hdr *h = (const struct ip_hdr *)(frame + 14);
+    struct ip_hdr *h = (struct ip_hdr *)(frame + 14);
     uint16_t avail = (uint16_t)(n - 14);
     uint16_t ihl = (uint16_t)((h->ver_ihl & 0x0F) * 4);
     uint16_t total = be16(h->total_len);
@@ -175,50 +170,15 @@ static void ip_handle_dbg(const uint8_t *frame, uint16_t n)
     if (be16(h->frag) & 0x3FFF)   /* MF 或 offset != 0：分片，暂不支持 */
         return;
 
-    uint32_t src = be32(h->src);
     uint32_t dst = be32(h->dst);
     if (dst != IP_ADDR && dst != IP_BCAST)
         return;
 
-    dbg_str("[ip] ");
-    dbg_ip(src);
-    dbg_str(" > ");
-    dbg_ip(dst);
-    dbg_str(" proto ");
-    dbg_dec(h->proto);
-    dbg_str(" len ");
-    dbg_dec(total);
+    ip_learn_src(frame, be32(h->src));
 
-    if (h->proto == IP_PROTO_ICMP && total >= (uint16_t)(ihl + 2)) {
-        const uint8_t *icmp = (const uint8_t *)h + ihl;
-        dbg_str(" icmp ");
-        dbg_dec(icmp[0]);
-        dbg_str("/");
-        dbg_dec(icmp[1]);
-    }
-    dbg_str("\n");
+    if (h->proto == IP_PROTO_ICMP)
+        icmp_input((uint8_t *)h, ihl, total);
 }
-
-void ip_test_send_echo(void)
-{
-    /* 8 字节 ICMP echo：type=8, code=0, checksum, id, seq */
-    uint8_t icmp[8] = {8, 0, 0, 0, 0x12, 0x34, 0x00, 0x01};
-    uint16_t c = csum16(icmp, 8);
-    icmp[2] = (uint8_t)(c & 0xFF);
-    icmp[3] = (uint8_t)(c >> 8);
-
-    int32_t r = ip_send(IP_PROTO_ICMP, IP_GW, icmp, 8);
-
-    dbg_str("[ip] echo -> ");
-    dbg_ip(IP_GW);
-    if (r == 0)
-        dbg_str(" sent\n");
-    else if (r == IP_EBUSY)
-        dbg_str(" arp busy\n");
-    else
-        dbg_str(" send fail\n");
-}
-#endif
 
 void ip_poll(void)
 {
@@ -231,12 +191,9 @@ void ip_poll(void)
         uint16_t et = ((uint16_t)frame[12] << 8) | frame[13];
         if (et == 0x0806) {
             arp_handle(frame, (uint16_t)n);
+        } else if (et == 0x0800) {
+            ip_handle(frame, (uint16_t)n);
         }
-#if IP_TEST_MODE
-        else if (et == 0x0800) {
-            ip_handle_dbg(frame, (uint16_t)n);
-        }
-#endif
     }
 }
 

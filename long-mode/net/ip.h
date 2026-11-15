@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 /* ── 接收侧调试模式 ──────────────────────────────────────────
- * 1 = 不启动 ush：内核发一个 ICMP echo 后死循环 ip_poll，
- *     每个通过校验的 IP 包打一行到 COM1；测完改回 0。 */
+ * 1 = 不启动 ush：死循环 ip_poll，回应外部 echo request，
+ *     请求/应答各打一行到 COM1；测完改回 0。 */
 #ifndef IP_TEST_MODE
 #define IP_TEST_MODE 1
 #endif
@@ -44,10 +44,5 @@ void ip_init();
 int32_t ip_send(uint8_t proto, uint32_t dst, const void* payload, uint16_t len);
 void ip_poll(void);
 int32_t ip_recv(uint8_t* out, uint16_t maxlen);
-
-#if IP_TEST_MODE
-/* 发一个 ICMP echo 到网关，给接收侧制造入站流量 */
-void ip_test_send_echo(void);
-#endif
 
 #endif
