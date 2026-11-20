@@ -14,11 +14,14 @@
 # Compiled files
 *.d
 *.dwo
+__pycache__/
+*.pyc
 
 # Build directories
 /build/
 /out/
 /dist/
+/uefi/build/
 
 # OS generated files
 .DS_Store
