@@ -43,7 +43,7 @@ def parse_psf(data: bytes):
         height = charsize
     elif data[0:4] == b"\x72\xb5\x4a\x86":          # PSF2
         (headersize, flags, num_glyphs, charsize,
-         height, width) = struct.unpack_from("<IIIII", data, 8)
+         height, width) = struct.unpack_from("<IIIIII", data, 8)
         glyph_offset = headersize
         has_unicode = bool(flags & 1)
     else:

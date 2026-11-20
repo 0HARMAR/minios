@@ -9,6 +9,7 @@
 .type _start, @function
 _start:
     xorl %ebp, %ebp
+    subq $8, %rsp          /* align the stack for the SysV call below */
     call kernel_main
 
 1:

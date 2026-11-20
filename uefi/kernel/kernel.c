@@ -359,7 +359,8 @@ void kernel_main(struct minios_boot_info *bi)
     kprintf("Firmware    : %s (rev 0x%08x)\n",
             bi->firmware, bi->firmware_revision);
     kprintf("Boot path   : UEFI -> GOP -> ExitBootServices -> 64-bit kernel\n");
-    kprintf("Console     : GOP framebuffer + COM1\n");
+    kprintf("Console     : GOP framebuffer%s\n",
+            serial_present() ? " + COM1" : " (COM1 not present)");
 
     kprintf("\n[ SYSTEM HALTED - no interrupts or keyboard in this build ]\n");
     halt_forever();
