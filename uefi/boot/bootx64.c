@@ -21,7 +21,8 @@
 #define KERNEL_LOAD_ADDR   0x100000ULL
 #define KERNEL_MAX_SIZE    (16ULL * 1024 * 1024)
 #define PAGE_SIZE          4096ULL
-#define PT_MAX_GIB         64ULL
+#define LOW_4GIB          0x100000000ULL
+#define REGION_1GIB       0x40000000ULL
 
 extern void minios_handoff(UINT64 boot_info, UINT64 entry,
                            UINT64 page_table, UINT64 stack_top)
@@ -36,7 +37,9 @@ static struct minios_boot_info gBootInfo;
 static UINT64 gPml5[512] __attribute__((aligned(PAGE_SIZE)));
 static UINT64 gPml4[512] __attribute__((aligned(PAGE_SIZE)));
 static UINT64 gPdp[512] __attribute__((aligned(PAGE_SIZE)));
-static UINT64 gPd[PT_MAX_GIB][512] __attribute__((aligned(PAGE_SIZE)));
+static UINT64 gPd[4][512] __attribute__((aligned(PAGE_SIZE)));
+static UINT64 gFbPdp[512] __attribute__((aligned(PAGE_SIZE)));
+static UINT64 gFbPd[512] __attribute__((aligned(PAGE_SIZE)));
 static UINT64 gCr3;
 
 static UINT8 gStack[64 * 1024] __attribute__((aligned(16)));
@@ -394,51 +397,68 @@ static void exit_boot_services(EFI_HANDLE image)
 /* ------------------------------------------------------------------ */
 static void setup_page_tables(UINT64 loader_base, UINT64 loader_size)
 {
-    UINT64 need = 0x100000000ULL;   /* 4 GiB */
-    UINT64 end;
-    UINT64 gib;
+    UINT64 cr4 = read_cr4();
+    UINT64 fb_base = gBootInfo.fb_base;
+    UINT64 fb_end = fb_base + gBootInfo.fb_size;
     UINT64 i;
     UINT64 j;
 
-    end = loader_base + loader_size;
-    if (end > need)
-        need = end;
-    end = gBootInfo.fb_base + gBootInfo.fb_size;
-    if (end > need)
-        need = end;
+    if (loader_base + loader_size > LOW_4GIB)
+        panic("loader is above 4 GiB; unsupported", EFI_ABORTED);
 
-    gib = (need + 0x3FFFFFFFULL) >> 30;
-    if (gib < 4)
-        gib = 4;
-    if (gib > PT_MAX_GIB)
-        panic("loader/framebuffer is above the 64 GiB mapping limit",
-              EFI_ABORTED);
-
+    memset(gPml5, 0, sizeof(gPml5));
     memset(gPml4, 0, sizeof(gPml4));
     memset(gPdp, 0, sizeof(gPdp));
+    memset(gFbPdp, 0, sizeof(gFbPdp));
+    memset(gFbPd, 0, sizeof(gFbPd));
 
-    for (i = 0; i < gib; i++) {
+    /* Low memory: identity map 0..4 GiB with 2 MiB pages. */
+    for (i = 0; i < 4; i++) {
         memset(gPd[i], 0, sizeof(gPd[i]));
         gPdp[i] = (UINT64)(UINTN)gPd[i] | 0x3;   /* present + writable */
-        for (j = 0; j < 512; j++) {
-            UINT64 phys = (i << 30) + (j << 21);
-            gPd[i][j] = phys | 0x83;             /* present + rw + 2 MiB */
-        }
+        for (j = 0; j < 512; j++)
+            gPd[i][j] = ((i << 30) + (j << 21)) | 0x83;
     }
     gPml4[0] = (UINT64)(UINTN)gPdp | 0x3;
+    gPml5[0] = (UINT64)(UINTN)gPml4 | 0x3;
 
     /*
-     * Some firmware enables 5-level paging (CR4.LA57).  In that case CR3 must
-     * point at a PML5, not a PML4; both map the same low memory.
+     * A 64-bit GOP framebuffer BAR can sit far above RAM, for example at
+     * 0x4000000000 (256 GiB) on the Lenovo XiaoXin Air 14 2020.  Do not map
+     * all the way up to it; map just the 1 GiB region that contains it.
      */
-    memset(gPml5, 0, sizeof(gPml5));
-    gPml5[0] = (UINT64)(UINTN)gPml4 | 0x3;
-    gCr3 = (read_cr4() & (1ULL << 12)) != 0
+    if (fb_base >= LOW_4GIB) {
+        UINT64 region = fb_base & ~(REGION_1GIB - 1);
+        UINT64 pml4_index = (fb_base >> 39) & 0x1FF;
+        UINT64 pdp_index = (fb_base >> 30) & 0x1FF;
+
+        if (fb_end > region + REGION_1GIB)
+            panic("framebuffer spans more than one 1 GiB region", EFI_ABORTED);
+        if ((cr4 & (1ULL << 12)) != 0 && (fb_base >> 48) != 0)
+            panic("framebuffer is outside the PML5[0] range", EFI_ABORTED);
+
+        /* PCD keeps framebuffer writes uncached on a 64-bit MMIO BAR. */
+        for (j = 0; j < 512; j++)
+            gFbPd[j] = (region + (j << 21)) | 0x93;
+        if (pml4_index == 0) {
+            gPdp[pdp_index] = (UINT64)(UINTN)gFbPd | 0x3;
+        } else {
+            gPml4[pml4_index] = (UINT64)(UINTN)gFbPdp | 0x3;
+            gFbPdp[pdp_index] = (UINT64)(UINTN)gFbPd | 0x3;
+        }
+        logf("Paging   : low 4 GiB + framebuffer region 0x%llx-0x%llx\n",
+             region, region + REGION_1GIB);
+    } else {
+        if (fb_end > LOW_4GIB)
+            panic("framebuffer crosses the 4 GiB boundary", EFI_ABORTED);
+        logf("Paging   : identity 0-4 GiB, 2 MiB pages\n");
+    }
+
+    gCr3 = (cr4 & (1ULL << 12)) != 0
                ? (UINT64)(UINTN)gPml5
                : (UINT64)(UINTN)gPml4;
-
-    logf("Paging   : identity map 0-%llu GiB, 2 MiB pages%s\n", gib,
-         (read_cr4() & (1ULL << 12)) != 0 ? ", 5-level" : "");
+    logf("Paging   : %s, CR3=0x%llx\n",
+         (cr4 & (1ULL << 12)) != 0 ? "5-level" : "4-level", gCr3);
 }
 
 /* ------------------------------------------------------------------ */

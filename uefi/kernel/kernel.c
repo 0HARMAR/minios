@@ -243,7 +243,7 @@ static int fb_init(void)
     g_height = g_bi->fb_height;
     g_pitch = g_bi->fb_pitch;
 
-    scale = (g_height + 479u) / 480u;
+    scale = (g_height + 599u) / 600u;
     if (scale < 1)
         scale = 1;
     if (scale > 4)

@@ -214,10 +214,11 @@ Firmware : ...
 GOP      : 1280x800, 32 bpp, pitch 1280 px, format 1
 Framebuf : 0x80000000 (3 MiB)
 Kernel   : \EFI\MINIOS\KERNEL.BIN
-Kernel   : 7736 bytes loaded at 0x100000
-Loader   : 0x10000000 (368640 bytes)
+Kernel   : 7900 bytes loaded at 0x100000
+Loader   : 0x10000000 (135168 bytes)
 Usable   : 974 MiB
-Paging   : identity map 0-4 GiB, 2 MiB pages
+Paging   : identity 0-4 GiB, 2 MiB pages
+Paging   : 4-level, CR3=0x1001e000
 BootInfo : 0x10059000, magic 0x4d494e4955454649
 
 Exiting boot services...
@@ -275,12 +276,18 @@ UEFI 固件
 
 ### 内存映射
 
-- 恒等映射范围：`max(4 GiB, 加载器末尾, 帧缓冲末尾)`，向上取整到 GiB；
-- 使用 2 MiB 大页；
-- 如果加载器或 GOP 帧缓冲被固件放在 4 GiB 以上，会自动扩展；
-- 映射上限 64 GiB（真机 GOP 帧缓冲远低于此）；
+- 低 4 GiB 恒等映射（2 MiB 大页），覆盖内核 1 MiB、加载器、栈和 BootInfo；
+- 帧缓冲在 4 GiB 以下时，已经包含在低 4 GiB 里；
+- 帧缓冲在 4 GiB 以上时，只映射它所在的 **1 GiB 区域**，按 PML4/PDP
+  索引建表，不会把 0 到高地址之间的空洞全部铺开；
+- 加载器本身必须在 4 GiB 以下（当前 PE ImageBase 是 `0x10000000`）；
+- 帧缓冲必须完整落在一个 1 GiB 区域内；
 - 如果固件开启了 5 级页表（`CR4.LA57=1`），会额外建一层 PML5，
-  避免把 4 级页表当成 5 级使用。
+  帧缓冲需位于 PML5[0] 覆盖的范围内。
+
+联想小新 Air 14 2020（Insyde 固件）把 GOP 帧缓冲放在
+`0x4000000000`（256 GiB）；这条“低 4 GiB + 帧缓冲所在 1 GiB”规则就是
+为这种 64 位 BAR 准备的，不会因为 256 GiB 超出映射上限而停机。
 
 ### BootInfo
 
@@ -347,6 +354,15 @@ BIOS 引导代码塞进 UEFI。
 固件没有可用的 GOP 线性帧缓冲（例如纯串口固件、`BltOnly` 模式）。
 这种固件不是这条分支的目标；可以在 QEMU+OVMF 下验证镜像。
 
+### 加载器报 `loader/framebuffer is above the ... mapping limit`
+
+这是旧版本把 0 到帧缓冲末尾连续映射导致的。现在只映射低 4 GiB +
+帧缓冲所在 1 GiB；如果仍然报错，检查：
+
+- 帧缓冲是否跨了两个 1 GiB 区域（当前不支持）；
+- 加载器是否被固件放到了 4 GiB 以上（当前不支持）；
+- 是否确实是 5 级页表下 PML5[0] 之外的地址。
+
 ### `ExitBootServices failed after several retries`
 
 固件在内存映射查询和退出之间又改了内存映射，重试 8 次仍失败。请记录
@@ -376,7 +392,7 @@ sudo apt install ovmf
 - 未签名，必须关闭 Secure Boot；
 - 没有中断/IDT、键盘、PS/2、USB HID、堆、文件系统、驱动；
 - 内核固定加载到 1 MiB，被占用则停机；
-- 页表映射上限 64 GiB；
+- 加载器必须在 4 GiB 以下；帧缓冲必须完整落在一个 1 GiB 区域内；
 - 只支持 GOP 线性帧缓冲，不支持 `BltOnly`；
 - 只做 UEFI，不生成 BIOS/UEFI 混合启动盘；首提交的 BIOS 软盘构建保留不变；
 - 镜像的 ESP 是 FAT16；极少数只认 FAT32 的固件需要手动复制到已有 ESP。
