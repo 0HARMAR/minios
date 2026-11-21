@@ -16,7 +16,7 @@ Layout (default 64 MiB):
     LBA total-1    backup GPT header
 
 Usage:
-    mkdisk.py OUTPUT.img BOOTX64.EFI KERNEL.BIN [--size-mib 64]
+    mkdisk.py OUTPUT.img BOOTX64.EFI KERNEL.BIN [--firmware WIFI9.UC]
 """
 
 import argparse
@@ -284,11 +284,18 @@ def main() -> int:
     ap.add_argument("output")
     ap.add_argument("bootx64")
     ap.add_argument("kernel")
+    ap.add_argument("--firmware", default=None,
+                    help="optional firmware blob, installed as EFI/MINIOS/WIFI9.UC")
     ap.add_argument("--size-mib", type=int, default=64)
     args = ap.parse_args()
 
     boot_data = Path(args.bootx64).read_bytes()
     kernel_data = Path(args.kernel).read_bytes()
+    firmware_data = b""
+    if args.firmware:
+        firmware_data = Path(args.firmware).read_bytes()
+        if not firmware_data:
+            raise SystemExit("error: firmware image is empty")
     if not boot_data:
         raise SystemExit("error: BOOTX64.EFI is empty")
     if not kernel_data:
@@ -305,6 +312,8 @@ def main() -> int:
     root = FatNode("")
     add_path(root, "EFI/BOOT/BOOTX64.EFI", boot_data)
     add_path(root, "EFI/MINIOS/KERNEL.BIN", kernel_data)
+    if firmware_data:
+        add_path(root, "EFI/MINIOS/WIFI9.UC", firmware_data)
 
     fat = build_fat16(part_sectors, root)
     primary, backup, entries = build_gpt(total_lba, part_start, part_last)
@@ -328,6 +337,8 @@ def main() -> int:
     print(f"filesystem : FAT16, {8 * SECTOR} bytes/cluster")
     print(f"files      : EFI/BOOT/BOOTX64.EFI ({len(boot_data)} bytes)")
     print(f"             EFI/MINIOS/KERNEL.BIN ({len(kernel_data)} bytes)")
+    if firmware_data:
+        print(f"             EFI/MINIOS/WIFI9.UC ({len(firmware_data)} bytes)")
     return 0
 
 

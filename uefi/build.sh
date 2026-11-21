@@ -42,13 +42,19 @@ CFLAGS=(
     -Wextra
 )
 
-INCLUDES=(-I"$HERE/boot" -I"$HERE/include" -I"$HERE/common")
+INCLUDES=(-I"$HERE/boot" -I"$HERE/include" -I"$HERE/common" -I"$HERE/kernel")
 
 mkdir -p "$BUILD"
 
 compile_common() {
     local src="$1" obj="$2"
     "$CC" "${CFLAGS[@]}" "${INCLUDES[@]}" -c "$src" -o "$obj"
+}
+
+compile_kernel() {
+    local src="$1" obj="$2"
+    "$CC" "${CFLAGS[@]}" "${INCLUDES[@]}" -mcmodel=small \
+        -c "$src" -o "$obj"
 }
 
 echo "[1/6] compiling shared runtime"
@@ -69,15 +75,19 @@ echo "[3/6] linking BOOTX64.EFI"
 
 echo "[4/6] compiling kernel"
 "$CC" -c "$HERE/kernel/start.S" -o "$BUILD/start.o"
-"$CC" "${CFLAGS[@]}" "${INCLUDES[@]}" -I"$HERE/kernel" -mcmodel=small \
-    -c "$HERE/kernel/kernel.c" -o "$BUILD/kernel.o"
+compile_kernel "$HERE/kernel/kernel.c" "$BUILD/kernel.o"
+compile_kernel "$HERE/kernel/memmap.c" "$BUILD/memmap.o"
+compile_kernel "$HERE/kernel/pci.c" "$BUILD/pci.o"
+compile_kernel "$HERE/kernel/fw.c" "$BUILD/fw.o"
+compile_kernel "$HERE/kernel/uefi_log.c" "$BUILD/uefi_log.o"
 
 echo "[5/6] linking KERNEL.ELF"
 # The flat-binary kernel has a single RWX load segment by design; there is no
 # ELF program header to express per-section permissions.
 "$LD" -T "$HERE/kernel/kernel.lds" --no-warn-rwx-segments \
     -o "$BUILD/KERNEL.ELF" \
-    "$BUILD/start.o" "$BUILD/kernel.o" \
+    "$BUILD/start.o" "$BUILD/kernel.o" "$BUILD/memmap.o" \
+    "$BUILD/pci.o" "$BUILD/fw.o" "$BUILD/uefi_log.o" \
     "$BUILD/format.o" "$BUILD/string.o" "$BUILD/serial.o"
 
 echo "[6/6] creating KERNEL.BIN"

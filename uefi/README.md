@@ -1,4 +1,4 @@
-# Mini-OS UEFI 启动（`uefi-boot` 分支）
+# Mini-OS UEFI 启动 + M0 Wi-Fi 侦察（`wifi-bringup` 分支）
 
 这个分支从首提交 `a505332` 拉出，给 Mini-OS 增加一条**原生 UEFI 启动链**，
 让它在现代笔记本（纯 UEFI、无 CSM）上也能从 U 盘启动。
@@ -6,15 +6,20 @@
 首提交里的 `long-mode/`、`protected-mode/` BIOS 软盘构建**原样保留**，
 UEFI 相关代码全部放在 `uefi/` 下，互不影响。
 
-当前里程碑只做「启动自检」：
+当前里程碑 = 启动自检 + **M0 Wi-Fi 侦察**：
 
 - UEFI 固件加载 `BOOTX64.EFI`
 - 加载器从 ESP 读取 `KERNEL.BIN`
 - 建立恒等映射页表，退出 Boot Services
 - 跳到 64 位内核
-- 内核在 GOP 帧缓冲上打印 CPU / 长模式 / 内存 / 帧缓冲信息，然后停机
+- 内核在 GOP 帧缓冲上打印 CPU / 长模式 / 内存 / 帧缓冲信息
+- M0：把 UEFI memory map、ACPI RSDP、可选固件 blob 传给内核；
+  内核全 bus/function 扫描 PCI，打印 BAR 大小、MSI/MSI-X 能力，
+  并解析 `iwlwifi-9000-pu-b0-jf-b0-46.ucode` 的 TLV 头
 
-还没有中断、键盘、堆、文件系统和驱动。
+M0 只读 PCI 配置空间（BAR sizing 除外，立即恢复），不编程 MSI/APIC、
+不分配 DMA、不下载固件、不碰 802.11。还没有中断、键盘、堆、文件系统
+和 Wi-Fi 设备驱动。
 
 ---
 
@@ -35,7 +40,12 @@ uefi/
 │   └── bootinfo.h     # 加载器 ↔ 内核的 BootInfo
 ├── kernel/
 │   ├── start.S        # 内核入口
-│   ├── kernel.c       # 自检 + GOP 控制台
+│   ├── kernel.c       # 自检 + GOP 控制台 + M0 入口
+│   ├── memmap.c/h     # UEFI memory map + ACPI RSDP 摘要
+│   ├── pci.c/h        # 全 bus/function PCI 扫描、BAR、MSI/MSI-X
+│   ├── fw.c/h         # iwlwifi TLV 头解析（只读）
+│   ├── log.h          # 内核日志接口
+│   ├── io.h           # in/out 端口访问
 │   ├── font8x16.h     # 内置点阵字库（自动生成）
 │   └── kernel.lds     # flat binary，链接到 0x100000
 ├── tools/
@@ -52,7 +62,8 @@ uefi/
 ```
 uefi/build/BOOTX64.EFI        PE32+ EFI 应用
 uefi/build/KERNEL.BIN         固定链接到 0x100000 的 flat binary
-uefi/build/minios-uefi.img    64 MiB GPT 磁盘镜像
+uefi/build/WIFI9.UC           可选固件 blob（构建时从 /lib/firmware 解压）
+uefi/build/minios-uefi.img    64 MiB GPT 磁盘镜像（含 WIFI9.UC）
 ```
 
 ---
@@ -84,7 +95,7 @@ sudo apt install build-essential python3 qemu-system-x86 ovmf ffmpeg
 ## 3. 构建、制盘、运行
 
 ```bash
-git switch uefi-boot
+git switch wifi-bringup
 
 # 1) 编译加载器和内核
 ./uefi/build.sh
@@ -94,6 +105,12 @@ git switch uefi-boot
 ```
 
 产物：`uefi/build/minios-uefi.img`。
+
+`mkdisk.sh` 会优先从 `/lib/firmware/intel/iwlwifi/` 或
+`/lib/firmware/` 找 `iwlwifi-9000-pu-b0-jf-b0-46.ucode.zst`，解压成
+`uefi/build/WIFI9.UC` 并放进 ESP 的 `EFI/MINIOS/WIFI9.UC`。仓库不提交
+固件二进制；可以用 `MINIOS_FW=/path/to/file.ucode` 覆盖，或让它缺省，
+此时 M0 仍会做 PCI 扫描，只是没有 TLV 输出。
 
 ### 在 QEMU 里测试
 
@@ -107,9 +124,14 @@ git switch uefi-boot
 # 无窗口 + 串口日志
 ./uefi/run_qemu.sh --disk --headless
 
-# 自动等待内核停机、截图并退出
-./uefi/run_qemu.sh --disk --headless --screenshot uefi/build/shot.png --timeout 40
+# 自动等待内核停机、截图并退出（M0 推荐）
+./uefi/run_qemu.sh --disk --headless \
+    --serial uefi/build/m0-serial.log \
+    --screenshot uefi/build/m0-shot.png --timeout 40
 ```
+
+QEMU 的默认 e1000e NIC 会作为 M0 的测试 target，打印 BAR/MSI/MSI-X；
+真实 9560 在目标笔记本上才会出现。
 
 `run_qemu.sh` 会自动检测 OVMF。串口日志默认写到
 `uefi/build/serial-<disk|usb>.log`（使用 `--screenshot` 时），也可以
@@ -135,6 +157,7 @@ ESP 是 FAT16、4 KiB 簇：
 ```
 /EFI/BOOT/BOOTX64.EFI
 /EFI/MINIOS/KERNEL.BIN
+/EFI/MINIOS/WIFI9.UC     # 可选，M0 固件侦察
 ```
 
 `BOOTX64.EFI` 是 UEFI 可移动介质默认启动路径，固件会自动找它。
@@ -166,6 +189,21 @@ sync
 
 也可以用 **Win32DiskImager** 直接写 `.img`。
 
+### 目标笔记本（M0）
+
+本仓库当前的目标机是 Lenovo 81YJ（XiaoXinAir-14IIL 2020，i5-1035G1，
+16 GB）。它的 Wi-Fi 是 **Intel Wireless-AC 9560，PCI `8086:34F0`，
+subsystem `8086:0234`，位于 `00:14.3`（ACPI `\_SB.PCI0.CNVW`）**。
+该机的 Secure Boot 已确认关闭，UEFI 镜像可以直接启动。
+
+M0 目标机实测（2026-11-21）：
+
+- BAR0：64-bit non-prefetchable，16 KiB，地址 `0x6013124000`（**在 4 GiB 以上**）；
+- MSI-X：16 vectors，table BIR0 offset `0x2000`，PBA BIR0 offset `0x3000`；
+  MSI 也支持 64-bit；两者当前都 disabled，IRQ 线为 255；
+- ACPI：RSDP rev 0（ACPI 1.0），RSDT `0x6bc28000`，没有 XSDT；
+- 固件 TLV：API 46；日志已通过 UEFI 变量读出（见下）。
+
 ### 笔记本固件设置
 
 1. 进入 BIOS/UEFI Setup（开机时 F2 / F10 / Del 等）。
@@ -196,9 +234,10 @@ sync
 ```
 ESP/EFI/BOOT/BOOTX64.EFI
 ESP/EFI/MINIOS/KERNEL.BIN
+ESP/EFI/MINIOS/WIFI9.UC     # 可选
 ```
 
-`KERNEL.BIN` 的位置是加载器里写死的；两个路径都要保留。
+`KERNEL.BIN`/`WIFI9.UC` 的位置是加载器里写死的；路径要保留。
 
 ---
 
@@ -214,14 +253,18 @@ Firmware : ...
 GOP      : 1280x800, 32 bpp, pitch 1280 px, format 1
 Framebuf : 0x80000000 (3 MiB)
 Kernel   : \EFI\MINIOS\KERNEL.BIN
-Kernel   : 7900 bytes loaded at 0x100000
+Kernel   : 14396 bytes loaded at 0x100000
 Loader   : 0x10000000 (135168 bytes)
-Usable   : 974 MiB
+Firmware : \EFI\MINIOS\WIFI9.UC
+Firmware : 0x3dde7000, 1519568 bytes
+ACPI RSDP: 0x3f77e000 sig RSD PTR  rev 0
+Usable   : 975 MiB
 Paging   : identity 0-4 GiB, 2 MiB pages
 Paging   : 4-level, CR3=0x1001e000
-BootInfo : 0x10059000, magic 0x4d494e4955454649
+BootInfo : 0x10020000, magic 0x4d494e4955454649
 
 Exiting boot services...
+MemMap   : buffer 0x3dde5000, 8192 bytes (desc 48)
 ```
 
 随后加载器切到内核，内核清屏并打印：
@@ -230,25 +273,63 @@ Exiting boot services...
 Mini-OS 64-bit Kernel
 =====================
 
-BootInfo    : 0x10059000, magic OK, version 1
+BootInfo    : 0x10020000, magic OK, version 2
 CPU         : ...
 CPU vendor  : ...
 Long mode   : EFER.LME=1, EFER.LMA=1
 Paging      : CR0.PG=1, CR4.PAE=1, 4-level
-Usable RAM  : 974 MiB
-Framebuffer : 1280x800, 32 bpp, pitch 1280, format 1
-FB address  : 0x80000000 (3 MiB)
-Text grid   : 78 x 21 cells, scale 2
-Kernel      : 0x100000, 7736 bytes
-Loader      : 0x10000000, 368640 bytes
-Firmware    : ...
-Boot path   : UEFI -> GOP -> ExitBootServices -> 64-bit kernel
+Usable RAM  : 975 MiB
+...
 Console     : GOP framebuffer + COM1
 
-[ SYSTEM HALTED - no interrupts or keyboard in this build ]
+--- M0 Wi-Fi probe ---
+
+UEFI memory map: 112 descriptors at 0x3dde5000 (desc 48 bytes, version 1)
+  conv 01: 0x0000000000-0x00000a0000 640 KiB
+  ...
+  conventional: 974 MiB in 8 ranges, largest 699 MiB
+ACPI RSDP: phys 0x3f77e000 sig 'RSD PTR ' rev 0 oem 'BOCHS ' rsdt 0x3f77d000 (ACPI 1.0, no xsdt)
+
+PCI topology (CF8/CFC, all buses/functions):
+  00:00.0 8086:29c0 class 0600.00 rev 00 hdr 00
+  ...
+
+=== M0 target 00:14.3 ===
+  ID 8086:34F0 sub 8086:0234 rev 30 class 0280
+  CMD 0006 STS 0010 IRQ 255 pin 1
+  BAR0 64-bit non-pref addr 0x6013124000 size 16384
+  CAP 01 PM   @c8 version 3 state 0
+  CAP 05 MSI  @d0 en=0 ... 64=1 ...
+  CAP 10 PCIe @40 ver=2 type=9 slot=0 link_speed=0 link_width=0
+  CAP 11 MSI-X@80 en=0 mask=0 n=16 table(bir=0 off=0x2000) pba(bir=0 off=0x3000)
+
+M0 target: 1 device(s) dumped.
+FW: WIFI9.UC size 1519568 API 46 build 7e3e4b69
+
+[ M0 DONE - SYSTEM HALTED ]
 ```
 
-看到 `SYSTEM HALTED` 就说明整条 UEFI → 64 位内核链路已经打通。
+QEMU 没有 9560，target 会是默认 e1000e（`8086:10d3`，`00:02.0`），
+并打印 `no 9560; dumped the first network controller (QEMU/test NIC)`；
+真实 9560 的 `00:14.3` 只会在目标笔记本上出现。
+
+看到 `SYSTEM HALTED` 就说明整条 UEFI → 64 位内核链路已经打通；
+看到 `=== M0 target ... ===` 和 `FW: ... API 46` 说明 M0 侦察完成。
+
+### M0 日志（UEFI NVRAM）
+
+内核在停机前调用 UEFI Runtime Services 的 `SetVariable`，把完整 M0
+日志写成非易失变量：
+
+- 变量名：`MiniOSM0Log`
+- GUID：`{4d304f53-0001-4d30-9a4b-4d304c4f4731}`
+- 目标机实测 `SetVariable status=0x0`，日志 4138 字节。
+
+这不是内核直接写 U 盘文件——内核还没有 USB/FAT 驱动。Windows 重启后
+用 `GetFirmwareEnvironmentVariableW`（管理员 + `SeSystemEnvironmentPrivilege`）
+读取，已经保存为 `C:\Users\hemin\Desktop\M0LOG.txt`，并复制到
+U 盘 `EFI/MINIOS/M0LOG.TXT`。项目内副本：
+[uefi/build/m0-target.log](build/m0-target.log)。
 
 ---
 
@@ -390,7 +471,16 @@ sudo apt install ovmf
 ## 8. 已知限制
 
 - 未签名，必须关闭 Secure Boot；
-- 没有中断/IDT、键盘、PS/2、USB HID、堆、文件系统、驱动；
+- M0 只做只读侦察：不编程 MSI/MSI-X/APIC、不做 DMA、不下载固件、
+  不实现 802.11；PCI BAR sizing 会短暂写 all-ones 并立即恢复；
+- 目标 9560 的 ID 是 `8086:34F0` / subsystem `8086:0234`；当前 Linux
+  `drv.c` 把所有 `34F0` 归到 QuZ/AX201，不能直接照抄，必须按 subsystem
+  匹配 9560/9000；
+- 目标 BAR0 在 `0x6013124000`（>4 GiB），当前 loader 不映射；M1 必须
+  增加显式 uncached 高地址 MMIO 映射；
+- 目标 ACPI 是 ACPI 1.0（RSDP rev 0，只有 RSDT，没有 XSDT）；ACPI 解析
+  必须支持 RSDT fallback；
+- 没有中断/IDT、键盘、PS/2、USB HID、堆、文件系统、Wi-Fi 驱动；
 - 内核固定加载到 1 MiB，被占用则停机；
 - 加载器必须在 4 GiB 以下；帧缓冲必须完整落在一个 1 GiB 区域内；
 - 只支持 GOP 线性帧缓冲，不支持 `BltOnly`；

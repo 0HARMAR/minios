@@ -8,7 +8,7 @@
 #define MINIOS_BOOTINFO_H
 
 #define MINIOS_BOOT_MAGIC   0x4D494E4955454649ULL /* "MINIUEFI" */
-#define MINIOS_BOOT_VERSION 1u
+#define MINIOS_BOOT_VERSION 3u                    /* v3: UEFI probe + runtime log */
 
 struct minios_boot_info {
     unsigned long long magic;         /* MINIOS_BOOT_MAGIC                   */
@@ -39,7 +39,24 @@ struct minios_boot_info {
     unsigned int       reserved0;
     char               firmware[64];
 
-    unsigned long long reserved1[2];
+    /*
+     * v2 probe hand-off.  All addresses are physical addresses that the
+     * loader guarantees to be below 4 GiB, because the kernel's boot page
+     * tables only identity-map the low 4 GiB (plus the framebuffer region).
+     */
+    unsigned long long memory_map;          /* EFI_MEMORY_DESCRIPTOR array */
+    unsigned long long memory_map_size;     /* bytes */
+    unsigned int       memory_map_desc_size;
+    unsigned int       memory_map_desc_version;
+    unsigned long long acpi_rsdp;           /* physical address, 0 if absent */
+    unsigned int       acpi_rsdp_size;      /* copied bytes, <= 64 */
+    unsigned int       reserved2;
+    unsigned char      acpi_rsdp_copy[64];  /* safe copy for the kernel */
+    unsigned long long fw_base;             /* firmware blob, < 4 GiB */
+    unsigned long long fw_size;
+    char               fw_name[16];         /* ESP 8.3 name, e.g. WIFI9.UC */
+    unsigned long long reserved3[2];
+    unsigned long long runtime_services;    /* EFI_RUNTIME_SERVICES * (v3) */
 };
 
 #endif /* MINIOS_BOOTINFO_H */

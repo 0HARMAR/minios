@@ -8,6 +8,11 @@
  *      framebuffer if they live above 4 GiB),
  *   4. leave boot services and jump to the flat-binary kernel in 64-bit mode.
  *
+ * For the M0 Wi-Fi probe the loader also:
+ *   - copies the final UEFI memory map to memory below 4 GiB,
+ *   - copies the ACPI RSDP into BootInfo,
+ *   - loads \EFI\MINIOS\WIFI9.UC (optional, 8.3 name) below 4 GiB.
+ *
  * The kernel receives a pointer to struct minios_boot_info in RDI.
  */
 #include <stddef.h>
@@ -20,9 +25,11 @@
 
 #define KERNEL_LOAD_ADDR   0x100000ULL
 #define KERNEL_MAX_SIZE    (16ULL * 1024 * 1024)
+#define FW_MAX_SIZE        (8ULL * 1024 * 1024)
 #define PAGE_SIZE          4096ULL
 #define LOW_4GIB          0x100000000ULL
 #define REGION_1GIB       0x40000000ULL
+#define RSDP_COPY_SIZE     36U
 
 extern void minios_handoff(UINT64 boot_info, UINT64 entry,
                            UINT64 page_table, UINT64 stack_top)
@@ -50,6 +57,11 @@ static UINT64 read_cr4(void)
 
     __asm__ volatile("mov %%cr4, %0" : "=r"(value));
     return value;
+}
+
+static int guid_equal(const EFI_GUID *a, const EFI_GUID *b)
+{
+    return memcmp(a, b, sizeof(*a)) == 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -300,6 +312,175 @@ static void load_kernel(EFI_HANDLE image)
 }
 
 /* ------------------------------------------------------------------ */
+/* optional firmware blob                                              */
+/* ------------------------------------------------------------------ */
+static void load_firmware(EFI_HANDLE image)
+{
+    static CHAR16 *paths[] = {
+        L"\\EFI\\MINIOS\\WIFI9.UC",
+        L"\\WIFI9.UC",
+    };
+    static const char *ascii_paths[] = {
+        "\\EFI\\MINIOS\\WIFI9.UC",
+        "\\WIFI9.UC",
+    };
+    EFI_LOADED_IMAGE_PROTOCOL *li = (EFI_LOADED_IMAGE_PROTOCOL *)0;
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = (EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *)0;
+    EFI_FILE_PROTOCOL *root = (EFI_FILE_PROTOCOL *)0;
+    EFI_FILE_PROTOCOL *file = (EFI_FILE_PROTOCOL *)0;
+    EFI_FILE_INFO *fi = (EFI_FILE_INFO *)0;
+    EFI_PHYSICAL_ADDRESS addr = LOW_4GIB - 1;
+    EFI_STATUS status;
+    UINTN info_size = 0;
+    UINTN pages;
+    UINTN total = 0;
+    UINT64 size;
+    UINTN i;
+    const char *name = "WIFI9.UC";
+    UINTN n;
+
+    status = gBS->HandleProtocol(image, &gEfiLoadedImageProtocolGuid,
+                                 (VOID **)&li);
+    if (EFI_ERROR(status) || li == (EFI_LOADED_IMAGE_PROTOCOL *)0) {
+        logf("Firmware : no LoadedImage protocol, skipping\n");
+        return;
+    }
+    status = gBS->HandleProtocol(li->DeviceHandle,
+                                 &gEfiSimpleFileSystemProtocolGuid,
+                                 (VOID **)&fs);
+    if (EFI_ERROR(status) || fs == (EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *)0) {
+        logf("Firmware : no SimpleFileSystem, skipping\n");
+        return;
+    }
+    status = fs->OpenVolume(fs, &root);
+    if (EFI_ERROR(status) || root == (EFI_FILE_PROTOCOL *)0) {
+        logf("Firmware : cannot open ESP, skipping\n");
+        return;
+    }
+    for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+        status = root->Open(root, &file, paths[i], EFI_FILE_MODE_READ, 0);
+        if (!EFI_ERROR(status))
+            break;
+        file = (EFI_FILE_PROTOCOL *)0;
+    }
+    if (file == (EFI_FILE_PROTOCOL *)0) {
+        root->Close(root);
+        logf("Firmware : WIFI9.UC not found (PCI probe only)\n");
+        return;
+    }
+    logf("Firmware : %s\n", ascii_paths[i]);
+
+    status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, NULL);
+    if (info_size == 0 ||
+        (EFI_ERROR(status) && status != EFI_BUFFER_TOO_SMALL)) {
+        file->Close(file);
+        root->Close(root);
+        logf("Firmware : cannot query size, skipping\n");
+        return;
+    }
+    status = gBS->AllocatePool(EfiLoaderData, info_size, (VOID **)&fi);
+    if (EFI_ERROR(status) || fi == (EFI_FILE_INFO *)0) {
+        file->Close(file);
+        root->Close(root);
+        logf("Firmware : out of memory, skipping\n");
+        return;
+    }
+    status = file->GetInfo(file, &gEfiFileInfoGuid, &info_size, fi);
+    if (EFI_ERROR(status)) {
+        gBS->FreePool(fi);
+        file->Close(file);
+        root->Close(root);
+        logf("Firmware : cannot read metadata, skipping\n");
+        return;
+    }
+    size = fi->FileSize;
+    gBS->FreePool(fi);
+
+    if (size == 0 || size > FW_MAX_SIZE) {
+        file->Close(file);
+        root->Close(root);
+        logf("Firmware : invalid size %llu, skipping\n", size);
+        return;
+    }
+
+    pages = (UINTN)((size + PAGE_SIZE - 1) / PAGE_SIZE);
+    status = gBS->AllocatePages(AllocateMaxAddress, EfiLoaderData, pages, &addr);
+    if (EFI_ERROR(status) || addr == 0) {
+        file->Close(file);
+        root->Close(root);
+        logf("Firmware : no buffer below 4 GiB, skipping\n");
+        return;
+    }
+    if (addr >= LOW_4GIB || size > LOW_4GIB - addr) {
+        file->Close(file);
+        root->Close(root);
+        gBS->FreePages(addr, pages);
+        logf("Firmware : buffer is not below 4 GiB, skipping\n");
+        return;
+    }
+
+    while (total < size) {
+        UINTN chunk = (UINTN)(size - total);
+
+        status = file->Read(file, &chunk, (VOID *)(UINTN)(addr + total));
+        if (EFI_ERROR(status) || chunk == 0) {
+            file->Close(file);
+            root->Close(root);
+            gBS->FreePages(addr, pages);
+            logf("Firmware : read failed, skipping\n");
+            return;
+        }
+        total += chunk;
+    }
+    file->Close(file);
+    root->Close(root);
+
+    gBootInfo.fw_base = (UINT64)addr;
+    gBootInfo.fw_size = size;
+    n = 0;
+    while (name[n] != '\0' && n + 1 < sizeof(gBootInfo.fw_name)) {
+        gBootInfo.fw_name[n] = name[n];
+        n++;
+    }
+    gBootInfo.fw_name[n] = '\0';
+    logf("Firmware : 0x%llx, %llu bytes\n", (UINT64)addr, size);
+}
+
+/* ------------------------------------------------------------------ */
+/* ACPI RSDP                                                           */
+/* ------------------------------------------------------------------ */
+static void copy_acpi_rsdp(void)
+{
+    EFI_CONFIGURATION_TABLE *ct = gST->ConfigurationTable;
+    VOID *rsdp = (VOID *)0;
+    UINTN i;
+    char sig[9];
+
+    if (ct == (EFI_CONFIGURATION_TABLE *)0)
+        return;
+
+    for (i = 0; i < gST->NumberOfTableEntries; i++) {
+        if (guid_equal(&ct[i].VendorGuid, &gEfiAcpi20TableGuid) ||
+            guid_equal(&ct[i].VendorGuid, &gEfiAcpiTableGuid)) {
+            rsdp = ct[i].VendorTable;
+            break;
+        }
+    }
+    if (rsdp == (VOID *)0) {
+        logf("ACPI RSDP: not found\n");
+        return;
+    }
+
+    gBootInfo.acpi_rsdp = (UINT64)(UINTN)rsdp;
+    gBootInfo.acpi_rsdp_size = RSDP_COPY_SIZE;
+    memcpy(gBootInfo.acpi_rsdp_copy, rsdp, RSDP_COPY_SIZE);
+    memcpy(sig, rsdp, 8);
+    sig[8] = '\0';
+    logf("ACPI RSDP: 0x%llx sig %s rev %u\n", gBootInfo.acpi_rsdp, sig,
+         (unsigned int)((const UINT8 *)rsdp)[15]);
+}
+
+/* ------------------------------------------------------------------ */
 /* memory map                                                          */
 /* ------------------------------------------------------------------ */
 static UINT64 usable_ram_from_map(VOID *map, UINTN size, UINTN desc_size)
@@ -362,7 +543,9 @@ static void exit_boot_services(EFI_HANDLE image)
         UINTN desc_size = 0;
         UINT32 desc_version = 0;
         EFI_STATUS status;
-        VOID *map = NULL;
+        EFI_PHYSICAL_ADDRESS map_addr = LOW_4GIB - 1;
+        UINTN map_pages;
+        EFI_MEMORY_DESCRIPTOR *map;
 
         status = gBS->GetMemoryMap(&size, NULL, &key, &desc_size,
                                    &desc_version);
@@ -371,23 +554,43 @@ static void exit_boot_services(EFI_HANDLE image)
             panic("GetMemoryMap failed before ExitBootServices", status);
 
         size += desc_size * 8;
-        status = gBS->AllocatePool(EfiLoaderData, size, &map);
-        if (EFI_ERROR(status) || map == NULL)
-            panic("cannot allocate the final memory map", status);
+        map_pages = (size + PAGE_SIZE - 1) / PAGE_SIZE;
+        status = gBS->AllocatePages(AllocateMaxAddress, EfiLoaderData,
+                                    map_pages, &map_addr);
+        if (EFI_ERROR(status) || map_addr == 0 ||
+            map_addr + (UINT64)map_pages * PAGE_SIZE > LOW_4GIB)
+            panic("cannot allocate the final memory map below 4 GiB",
+                  status);
 
+        map = (EFI_MEMORY_DESCRIPTOR *)(UINTN)map_addr;
+        logf("MemMap   : buffer 0x%llx, %llu bytes (desc %u)\n",
+             (UINT64)map_addr, (UINT64)map_pages * PAGE_SIZE,
+             (UINT32)desc_size);
         status = gBS->GetMemoryMap(&size, map, &key, &desc_size,
                                    &desc_version);
         if (EFI_ERROR(status)) {
-            gBS->FreePool(map);
-            continue;
+            gBS->FreePages(map_addr, map_pages);
+            if (status == EFI_BUFFER_TOO_SMALL)
+                continue;
+            panic("GetMemoryMap failed before ExitBootServices", status);
         }
+
+        gBootInfo.memory_map = (UINT64)map_addr;
+        gBootInfo.memory_map_size = size;
+        gBootInfo.memory_map_desc_size = (UINT32)desc_size;
+        gBootInfo.memory_map_desc_version = desc_version;
 
         status = gBS->ExitBootServices(image, key);
         if (!EFI_ERROR(status)) {
             gConOut = (EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *)0;
             return;
         }
-        gBS->FreePool(map);
+
+        gBootInfo.memory_map = 0;
+        gBootInfo.memory_map_size = 0;
+        gBootInfo.memory_map_desc_size = 0;
+        gBootInfo.memory_map_desc_version = 0;
+        gBS->FreePages(map_addr, map_pages);
     }
     panic("ExitBootServices failed after several retries", EFI_ABORTED);
 }
@@ -484,6 +687,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     memset(&gBootInfo, 0, sizeof(gBootInfo));
     gBootInfo.magic = MINIOS_BOOT_MAGIC;
     gBootInfo.version = MINIOS_BOOT_VERSION;
+    gBootInfo.runtime_services = (UINT64)(UINTN)gST->RuntimeServices;
     copy_firmware_name(&gBootInfo);
 
     logf("Mini-OS UEFI Loader\n");
@@ -496,6 +700,8 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     init_gop(&gBootInfo);
     load_kernel(image);
+    load_firmware(image);
+    copy_acpi_rsdp();
 
     gBootInfo.usable_ram = probe_memory();
     if (gBootInfo.usable_ram != 0)

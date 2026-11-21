@@ -92,7 +92,7 @@ if [ -n "$CODE" ]; then
     cp "$VARS" "$VARS_COPY"
 fi
 
-QEMU_ARGS=(-machine q35 -m 1024 -no-reboot -name "Mini-OS UEFI")
+QEMU_ARGS=(-machine q35 -m "${QEMU_MEM:-1024}" -no-reboot -name "Mini-OS UEFI")
 if [ -n "$CODE" ]; then
     QEMU_ARGS+=(-drive "if=pflash,format=raw,readonly=on,file=$CODE")
     QEMU_ARGS+=(-drive "if=pflash,format=raw,file=$VARS_COPY")

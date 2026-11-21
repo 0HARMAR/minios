@@ -24,8 +24,48 @@ for f in "$BUILD/BOOTX64.EFI" "$BUILD/KERNEL.BIN"; do
     fi
 done
 
+# Optional M0 firmware blob.  The repo never stores the binary: it is
+# decompressed from the host's linux-firmware package at image-build time.
+FW_SRC="${MINIOS_FW:-}"
+if [ -z "$FW_SRC" ]; then
+    for candidate in \
+        /lib/firmware/intel/iwlwifi/iwlwifi-9000-pu-b0-jf-b0-46.ucode.zst \
+        /lib/firmware/iwlwifi-9000-pu-b0-jf-b0-46.ucode.zst \
+        /lib/firmware/intel/iwlwifi/iwlwifi-9000-pu-b0-jf-b0-46.ucode \
+        /lib/firmware/iwlwifi-9000-pu-b0-jf-b0-46.ucode; do
+        if [ -f "$candidate" ]; then
+            FW_SRC="$candidate"
+            break
+        fi
+    done
+fi
+
+FW_ARG=()
+if [ -n "$FW_SRC" ] && [ -f "$FW_SRC" ]; then
+    FW_BLOB="$BUILD/WIFI9.UC"
+    case "$FW_SRC" in
+        *.zst)
+            if command -v zstd >/dev/null 2>&1; then
+                zstd -dc "$FW_SRC" > "$FW_BLOB"
+            elif command -v unzstd >/dev/null 2>&1; then
+                unzstd -c "$FW_SRC" > "$FW_BLOB"
+            else
+                echo "error: zstd/unzstd is required for $FW_SRC" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            cp "$FW_SRC" "$FW_BLOB"
+            ;;
+    esac
+    FW_ARG=(--firmware "$FW_BLOB")
+    echo "firmware   : $FW_BLOB ($(wc -c < "$FW_BLOB") bytes) from $FW_SRC"
+else
+    echo "warning: no iwlwifi-9000 firmware found; image will run PCI probe only" >&2
+fi
+
 python3 "$HERE/tools/mkdisk.py" "$IMAGE" \
-    "$BUILD/BOOTX64.EFI" "$BUILD/KERNEL.BIN"
+    "$BUILD/BOOTX64.EFI" "$BUILD/KERNEL.BIN" "${FW_ARG[@]}"
 
 # Optional integrity checks when the host tools are available.
 if command -v sgdisk >/dev/null 2>&1; then

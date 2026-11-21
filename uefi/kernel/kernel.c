@@ -1,15 +1,21 @@
 /*
- * kernel.c - Mini-OS 64-bit kernel, UEFI boot milestone.
+ * kernel.c - Mini-OS 64-bit kernel, UEFI boot milestone + M0 Wi-Fi probe.
  *
- * This build only proves the hand-off: it verifies BootInfo, prints long
- * mode/CPU/memory/framebuffer facts on a GOP framebuffer (and COM1), then
- * halts.  Interrupts, paging management, keyboard and drivers come later.
+ * The kernel verifies BootInfo, prints long mode/CPU/memory/framebuffer
+ * facts, then dumps the UEFI memory map, ACPI RSDP, PCI topology and the
+ * optional iwlwifi firmware TLV header.  It does not program interrupts,
+ * DMA or the Wi-Fi device yet.
  */
 #include "bootinfo.h"
 #include "format.h"
 #include "serial.h"
 #include "string.h"
 #include "font8x16.h"
+#include "log.h"
+#include "memmap.h"
+#include "pci.h"
+#include "fw.h"
+#include "uefi_log.h"
 
 typedef unsigned char u8;
 typedef unsigned int u32;
@@ -20,7 +26,11 @@ typedef unsigned long long u64;
 #define FONT_GAP 2u
 #define EFER_MSR 0xC0000080ULL
 
+#define KLOG_BUF_SIZE 8192UL
+
 static struct minios_boot_info *g_bi;
+static char g_logbuf[KLOG_BUF_SIZE];
+static unsigned long g_loglen;
 static u8 *g_fb;
 static u32 g_width;
 static u32 g_height;
@@ -268,17 +278,30 @@ static int fb_init(void)
 /* ------------------------------------------------------------------ */
 /* logging                                                             */
 /* ------------------------------------------------------------------ */
-static void kprintf(const char *fmt, ...)
+void klog(const char *fmt, ...)
 {
     char buf[512];
     va_list ap;
+    const char *p;
 
     va_start(ap, fmt);
     mini_vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
+
+    for (p = buf; *p != '\0' && g_loglen + 1 < KLOG_BUF_SIZE; p++)
+        g_logbuf[g_loglen++] = *p;
+    g_logbuf[g_loglen] = '\0';
+
     serial_puts(buf);
     if (g_fb != (u8 *)0)
         fb_puts(buf);
+}
+
+const char *klog_data(unsigned long *len)
+{
+    if (len != (unsigned long *)0)
+        *len = g_loglen;
+    return g_logbuf;
 }
 
 static void halt_forever(void)
@@ -322,46 +345,54 @@ void kernel_main(struct minios_boot_info *bi)
     memcpy(vendor + 8, &ecx, 4);
     vendor[12] = '\0';
 
-    kprintf("\nMini-OS 64-bit Kernel\n");
-    kprintf("=====================\n\n");
-    kprintf("BootInfo    : 0x%llx, magic OK, version %u\n",
+    klog("\nMini-OS 64-bit Kernel\n");
+    klog("=====================\n\n");
+    klog("BootInfo    : 0x%llx, magic OK, version %u\n",
             (unsigned long long)(unsigned long)bi, bi->version);
-    kprintf("CPU         : %s\n", brand);
-    kprintf("CPU vendor  : %s\n", vendor);
-    kprintf("Long mode   : EFER.LME=%u, EFER.LMA=%u\n",
+    klog("CPU         : %s\n", brand);
+    klog("CPU vendor  : %s\n", vendor);
+    klog("Long mode   : EFER.LME=%u, EFER.LMA=%u\n",
             (u32)((efer >> 8) & 1), (u32)((efer >> 10) & 1));
-    kprintf("Paging      : CR0.PG=%u, CR4.PAE=%u, %u-level\n",
+    klog("Paging      : CR0.PG=%u, CR4.PAE=%u, %u-level\n",
             (u32)((cr0 >> 31) & 1), (u32)((cr4 >> 5) & 1),
             (u32)(((cr4 >> 12) & 1) != 0 ? 5 : 4));
 
     if (bi->usable_ram != 0)
-        kprintf("Usable RAM  : %llu MiB\n", bi->usable_ram >> 20);
+        klog("Usable RAM  : %llu MiB\n", bi->usable_ram >> 20);
     else
-        kprintf("Usable RAM  : unknown\n");
+        klog("Usable RAM  : unknown\n");
 
     if (g_fb != (u8 *)0) {
-        kprintf("Framebuffer : %ux%u, %u bpp, pitch %u, format %u\n",
+        klog("Framebuffer : %ux%u, %u bpp, pitch %u, format %u\n",
                 bi->fb_width, bi->fb_height, bi->fb_bpp, bi->fb_pitch,
                 bi->fb_format);
-        kprintf("FB address  : 0x%llx (%llu MiB)\n", bi->fb_base,
+        klog("FB address  : 0x%llx (%llu MiB)\n", bi->fb_base,
                 bi->fb_size >> 20);
-        kprintf("Text grid   : %u x %u cells, scale %u\n",
+        klog("Text grid   : %u x %u cells, scale %u\n",
                 (g_width - 2 * g_margin_x) / g_char_w,
                 (g_height - 2 * g_margin_y) / g_line_h, g_scale);
     } else {
-        kprintf("Framebuffer : unavailable, serial only\n");
+        klog("Framebuffer : unavailable, serial only\n");
     }
 
-    kprintf("Kernel      : 0x%llx, %llu bytes\n",
+    klog("Kernel      : 0x%llx, %llu bytes\n",
             bi->kernel_base, bi->kernel_size);
-    kprintf("Loader      : 0x%llx, %llu bytes\n",
+    klog("Loader      : 0x%llx, %llu bytes\n",
             bi->loader_base, bi->loader_size);
-    kprintf("Firmware    : %s (rev 0x%08x)\n",
+    klog("Firmware    : %s (rev 0x%08x)\n",
             bi->firmware, bi->firmware_revision);
-    kprintf("Boot path   : UEFI -> GOP -> ExitBootServices -> 64-bit kernel\n");
-    kprintf("Console     : GOP framebuffer%s\n",
+    klog("Boot path   : UEFI -> GOP -> ExitBootServices -> 64-bit kernel\n");
+    klog("Console     : GOP framebuffer%s\n",
             serial_present() ? " + COM1" : " (COM1 not present)");
 
-    kprintf("\n[ SYSTEM HALTED - no interrupts or keyboard in this build ]\n");
+    klog("\n--- M0 Wi-Fi probe ---\n");
+    memmap_dump(bi);
+    pci_dump();
+    fw_dump(bi);
+    pci_dump_target();
+    fw_summary(bi);
+
+    klog("\n[ M0 DONE - SYSTEM HALTED ]\n");
+    uefi_log_save(bi);
     halt_forever();
 }
